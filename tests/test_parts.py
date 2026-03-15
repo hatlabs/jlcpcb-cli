@@ -1,6 +1,7 @@
 """Tests for parts order data extraction functions."""
 
 from jlcpcb_cli.core.parts import (
+    _extract_library_item,
     _extract_parts_batch,
     _extract_parts_batch_detail,
     _extract_component,
@@ -137,3 +138,25 @@ def test_extract_parts_batch_detail():
     assert order["paymentMethod"] == "ADYEN_CARD"
     assert len(order["components"]) == 1
     assert order["components"][0]["componentCode"] == "C20625731"
+
+
+def test_extract_library_item():
+    item = {
+        "componentCode": "C105362",
+        "componentModel": "FMF06FTHR010-LH",
+        "componentBrand": "PSA(Prosperity Dielectrics)",
+        "componentType": "Resistors",
+        "componentSpecification": "1206",
+        "description": "10mΩ 1W Current Sense Resistor",
+        "privateStockCount": 104,
+        "rohsFlag": 1,
+    }
+
+    result = _extract_library_item(item)
+
+    assert result["componentCode"] == "C105362"
+    assert result["model"] == "FMF06FTHR010-LH"
+    assert result["brand"] == "PSA(Prosperity Dielectrics)"
+    assert result["type"] == "Resistors"
+    assert result["stockCount"] == 104
+    assert result["rohs"] is True

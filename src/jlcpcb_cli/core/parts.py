@@ -1,14 +1,62 @@
-"""JLCPCB Parts Manager order data fetching and extraction."""
+"""JLCPCB Parts Manager: library inventory and order data."""
 
 import time
+import urllib.parse
 
 from jlcpcb_cli.core.client import JlcpcbClient
 from jlcpcb_cli.core.util import ms_to_iso
 
-PARTS_ORDER_LIST_PATH = (
+_API_PREFIX = (
     "/api/overseas-smt-component-order-platform/v1"
-    "/overseasSmtComponentOrder/presaleOrder/selectPresaleOrderList"
+    "/overseasSmtComponentOrder"
 )
+
+PARTS_ORDER_LIST_PATH = f"{_API_PREFIX}/presaleOrder/selectPresaleOrderList"
+PARTS_LIBRARY_PATH = f"{_API_PREFIX}/myLibrary/getCustomerComponentStock"
+
+
+def list_library(
+    client: JlcpcbClient,
+    *,
+    search: str | None = None,
+    page: int = 1,
+    limit: int = 30,
+) -> dict:
+    """List components in the parts library (inventory stored at JLCPCB)."""
+    params = {
+        "pageNum": page,
+        "pageSize": limit,
+        "keyWord": search or "",
+        "_t": int(time.time() * 1000),
+    }
+
+    result = client.api_get(PARTS_LIBRARY_PATH, params)
+    page_data = result["data"]
+    items = page_data.get("list") or []
+
+    return {
+        "pagination": {
+            "page": page_data.get("pageNum", page),
+            "pageSize": page_data.get("pageSize", limit),
+            "total": page_data.get("total", 0),
+            "pages": page_data.get("pages", 0),
+        },
+        "components": [_extract_library_item(item) for item in items],
+    }
+
+
+def _extract_library_item(item: dict) -> dict:
+    """Extract a component from the library inventory."""
+    return {
+        "componentCode": item.get("componentCode"),
+        "model": item.get("componentModel"),
+        "brand": item.get("componentBrand"),
+        "type": item.get("componentType"),
+        "spec": item.get("componentSpecification"),
+        "description": item.get("description"),
+        "stockCount": item.get("privateStockCount"),
+        "rohs": bool(item.get("rohsFlag")),
+    }
 
 
 def list_parts_orders(
