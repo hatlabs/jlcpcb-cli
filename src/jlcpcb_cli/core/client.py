@@ -46,9 +46,53 @@ class JlcpcbClient:
         return auth.get_xsrf_token(self.cookie_jar)
 
     def _ensure_session(self) -> None:
-        """Check session validity before making requests."""
+        """Check session validity and refresh XSRF token if needed."""
         if not auth.has_valid_session(self.cookie_jar):
             self._session_expired()
+        if self.xsrf_token is None:
+            self._refresh_xsrf_token()
+
+    def _refresh_xsrf_token(self) -> None:
+        """Refresh the XSRF token by visiting the JLCPCB site.
+
+        The XSRF-TOKEN cookie expires every ~30 minutes, but the
+        JLCPCB_SESSION_ID is long-lived. A simple GET to the site
+        with the session cookie triggers the server to set a fresh
+        XSRF-TOKEN cookie.
+        """
+        import sys
+
+        print("Refreshing XSRF token...", file=sys.stderr)
+
+        headers = {
+            "User-Agent": "jlcpcb-cli/0.1.0",
+            "Accept": "text/html",
+        }
+        req = urllib.request.Request(
+            f"{BASE_URL}/user-center/orders/", headers=headers
+        )
+
+        try:
+            with self.opener.open(req, timeout=30) as resp:
+                resp.read()  # consume body to complete the request
+        except urllib.error.HTTPError as e:
+            if e.code in (302, 401, 403):
+                self._session_expired()
+            raise JlcpcbAPIError(
+                f"Token refresh failed: HTTP {e.code}", status_code=e.code
+            ) from e
+        except urllib.error.URLError as e:
+            raise JlcpcbAPIError(f"Token refresh failed: {e.reason}") from e
+
+        # The opener's cookie processor should have captured the new XSRF-TOKEN
+        if self.xsrf_token is None:
+            self._session_expired()
+
+        # Invalidate secret key since it was tied to the old XSRF token
+        self._invalidate_secret_key()
+
+        # Persist the refreshed cookies
+        auth.save_cookies(self.cookie_jar)
 
     def _get_secret_key(self) -> str:
         """Obtain a secret key from the JLCPCB API.
@@ -109,7 +153,8 @@ class JlcpcbClient:
     def api_post(self, path: str, data: dict) -> dict:
         """Make an authenticated POST request to a JLCPCB API endpoint.
 
-        Handles the secret key protocol and XSRF token automatically.
+        Handles the secret key protocol, XSRF token refresh, and
+        auto-logout recovery automatically.
         """
         self._ensure_session()
         try:
@@ -117,16 +162,28 @@ class JlcpcbClient:
         except JlcpcbAPIError as e:
             if e.status_code in (302, 401, 403):
                 self._session_expired()
-            # Retry once on secret key expiry (code 29003)
-            if "29003" in str(e):
-                self._invalidate_secret_key()
+            # Retry once on secret key expiry (code 29003) or
+            # auto-logout (code 460) — refresh tokens and retry
+            if "29003" in str(e) or "code=460" in str(e):
+                self._refresh_xsrf_token()
                 return self._do_api_post(path, data)
             raise
 
     def api_get(self, path: str, params: dict | None = None) -> dict:
         """Make an authenticated GET request to a JLCPCB API endpoint."""
         self._ensure_session()
+        try:
+            return self._do_api_get(path, params)
+        except JlcpcbAPIError as e:
+            if e.status_code in (302, 401, 403):
+                self._session_expired()
+            if "29003" in str(e) or "code=460" in str(e):
+                self._refresh_xsrf_token()
+                return self._do_api_get(path, params)
+            raise
 
+    def _do_api_get(self, path: str, params: dict | None = None) -> dict:
+        """Execute an authenticated GET request."""
         url = f"{BASE_URL}{path}"
         if params:
             url = f"{url}?{urllib.parse.urlencode(params)}"

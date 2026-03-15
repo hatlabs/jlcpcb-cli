@@ -55,12 +55,12 @@ def get_xsrf_token(jar: http.cookiejar.MozillaCookieJar) -> str | None:
 
 
 def has_valid_session(jar: http.cookiejar.MozillaCookieJar) -> bool:
-    """Check if the cookie jar has the required auth tokens."""
-    has_session = any(
-        cookie.name == "JLCPCB_SESSION_ID" for cookie in jar
-    )
-    has_xsrf = get_xsrf_token(jar) is not None
-    return has_session and has_xsrf
+    """Check if the cookie jar has the long-lived session cookie.
+
+    Only checks for JLCPCB_SESSION_ID. The XSRF token is short-lived
+    and refreshed automatically by the client.
+    """
+    return any(cookie.name == "JLCPCB_SESSION_ID" for cookie in jar)
 
 
 def _find_chrome() -> str:
