@@ -144,6 +144,20 @@ def _extract_order_detail(order: dict) -> dict:
     return base
 
 
+def _extract_files(record: dict) -> dict:
+    """Extract downloadable file URLs from an order record."""
+    files = {}
+    if record.get("orderImgUrl"):
+        files["boardImage"] = record["orderImgUrl"]
+    if record.get("orderFileUrl"):
+        files["gerbers"] = record["orderFileUrl"]
+    if record.get("bomFileUrl"):
+        files["bom"] = record["bomFileUrl"]
+    if record.get("coordinateFileUrl"):
+        files["coordinates"] = record["coordinateFileUrl"]
+    return files or None
+
+
 def _extract_pcb_detail(record: dict) -> dict:
     """Extract PCB-specific order details."""
     detail = record.get("detail") or {}
@@ -158,6 +172,7 @@ def _extract_pcb_detail(record: dict) -> dict:
         "shippingMethod": record.get("freightModeName"),
         "company": record.get("companyName"),
         "country": record.get("country"),
+        "files": _extract_files(record),
         "specs": {
             "layers": pcb.get("stencilLayer"),
             "thickness": pcb.get("stencilPly"),
@@ -192,6 +207,7 @@ def _extract_smt_detail(record: dict) -> dict:
         "bomFileName": record.get("bomFileName"),
         "coordinateFileName": record.get("coordinateFileName"),
         "shippingMethod": record.get("freightModeName"),
+        "files": _extract_files(record),
         "costs": {
             "engineering": record.get("projectMoney"),
             "assembly": record.get("dummyMoney"),

@@ -205,6 +205,34 @@ class JlcpcbClient:
 
         return result
 
+    def download_file(self, path: str, output_path: "Path") -> None:
+        """Download a file from JLCPCB to disk."""
+        from pathlib import Path
+        output_path = Path(output_path)
+
+        self._ensure_session()
+
+        url = f"{BASE_URL}{path}" if path.startswith("/") else path
+
+        headers = {
+            "User-Agent": "jlcpcb-cli/0.1.0",
+            "Referer": "https://jlcpcb.com/user-center/orders/",
+        }
+
+        req = urllib.request.Request(url, headers=headers)
+
+        try:
+            with self.opener.open(req, timeout=60) as resp:
+                output_path.write_bytes(resp.read())
+        except urllib.error.HTTPError as e:
+            if e.code in (302, 401, 403):
+                self._session_expired()
+            raise JlcpcbAPIError(
+                f"Download failed: HTTP {e.code}", status_code=e.code
+            ) from e
+        except urllib.error.URLError as e:
+            raise JlcpcbAPIError(f"Download failed: {e.reason}") from e
+
     def _session_expired(self) -> None:
         """Raise an error indicating session expiry."""
         raise JlcpcbAPIError(

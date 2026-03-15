@@ -72,15 +72,45 @@ def orders_list(ctx: CliContext, status, search, limit, page):
 
 @orders.command("get")
 @click.argument("batch_num")
+@click.option("--output-dir", type=click.Path(exists=True), help="Download files to this directory.")
 @click.pass_obj
-def orders_get(ctx: CliContext, batch_num):
+def orders_get(ctx: CliContext, batch_num, output_dir):
     """Get full details for an order batch."""
     try:
         result = get_order(ctx.client, batch_num)
+        if output_dir:
+            from pathlib import Path
+
+            out = Path(output_dir).resolve()
+            for order in result.get("orders", []):
+                code = order.get("orderCode", "unknown")
+                files = order.get("files") or {}
+                for label, url_path in files.items():
+                    ext = _file_extension(label)
+                    filename = f"{code}-{label}{ext}"
+                    path = (out / filename).resolve()
+                    if not str(path).startswith(str(out)):
+                        click.echo(f"Skipping unsafe path: {filename}", err=True)
+                        continue
+                    if path.exists():
+                        click.echo(f"Skipping (exists): {path}", err=True)
+                        continue
+                    ctx.client.download_file(url_path, path)
+                    click.echo(f"Downloaded: {path}", err=True)
         _output(result)
     except JlcpcbAPIError as e:
         click.echo(f"Error: {e}", err=True)
         sys.exit(1)
+
+
+def _file_extension(label: str) -> str:
+    """Map file label to a suitable extension."""
+    return {
+        "boardImage": ".png",
+        "gerbers": ".zip",
+        "bom": ".csv",
+        "coordinates": ".csv",
+    }.get(label, "")
 
 
 def main():
