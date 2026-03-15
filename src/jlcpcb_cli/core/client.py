@@ -158,11 +158,7 @@ class JlcpcbClient:
         except urllib.error.URLError as e:
             raise JlcpcbAPIError(f"Connection error: {e.reason}") from e
 
-        if not result.get("success"):
-            code = result.get("code")
-            msg = result.get("message", "unknown error")
-            raise JlcpcbAPIError(f"API error: {msg} (code={code})")
-
+        self._check_result(result)
         return result
 
     def _do_api_post(self, path: str, data: dict) -> dict:
@@ -198,12 +194,32 @@ class JlcpcbClient:
         except urllib.error.URLError as e:
             raise JlcpcbAPIError(f"Connection error: {e.reason}") from e
 
-        if not result.get("success"):
-            code = result.get("code")
-            msg = result.get("message", "unknown error")
-            raise JlcpcbAPIError(f"API error: {msg} (code={code})")
-
+        self._check_result(result)
         return result
+
+    @staticmethod
+    def _check_result(result: dict) -> None:
+        """Validate an API response.
+
+        JLCPCB uses two response formats:
+        - Order APIs: {"success": true/false, "code": 200, "message": "..."}
+        - Parts APIs: {"code": 200, "msg": "...", "data": ...}
+        """
+        # Format 1: explicit success field
+        if "success" in result:
+            if not result["success"]:
+                code = result.get("code")
+                msg = result.get("message", "unknown error")
+                raise JlcpcbAPIError(f"API error: {msg} (code={code})")
+            return
+
+        # Format 2: code-only (200 = success)
+        code = result.get("code")
+        if code == 200:
+            return
+
+        msg = result.get("msg") or result.get("message", "unknown error")
+        raise JlcpcbAPIError(f"API error: {msg} (code={code})")
 
     def download_file(self, path: str, output_path: "Path") -> None:
         """Download a file from JLCPCB to disk."""

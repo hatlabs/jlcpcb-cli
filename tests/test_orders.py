@@ -3,8 +3,8 @@
 from jlcpcb_cli.core.orders import (
     _extract_batch,
     _extract_order_detail,
-    _ms_to_iso,
 )
+from jlcpcb_cli.core.util import ms_to_iso as _ms_to_iso
 
 
 def test_ms_to_iso_none():

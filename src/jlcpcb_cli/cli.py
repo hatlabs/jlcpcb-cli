@@ -9,6 +9,7 @@ import click
 from jlcpcb_cli.core import auth
 from jlcpcb_cli.core.client import JlcpcbClient, JlcpcbAPIError
 from jlcpcb_cli.core.orders import get_order, list_orders
+from jlcpcb_cli.core.parts import get_parts_order, list_parts_orders
 
 
 @dataclass
@@ -97,6 +98,47 @@ def orders_get(ctx: CliContext, batch_num, output_dir):
                         continue
                     ctx.client.download_file(url_path, path)
                     click.echo(f"Downloaded: {path}", err=True)
+        _output(result)
+    except JlcpcbAPIError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
+
+@cli.group()
+@click.pass_obj
+def parts(ctx: CliContext):
+    """Parts Manager order operations."""
+    pass
+
+
+@parts.command("list")
+@click.option(
+    "--status",
+    type=click.Choice(["all", "paid", "unpaid", "cancelled", "completed"]),
+    default="all",
+    help="Filter by order status.",
+)
+@click.option("--search", default=None, help="Search by keyword.")
+@click.option("--limit", default=25, type=int, help="Results per page.")
+@click.option("--page", default=1, type=int, help="Page number.")
+@click.pass_obj
+def parts_list(ctx: CliContext, status, search, limit, page):
+    """List parts order batches."""
+    try:
+        result = list_parts_orders(ctx.client, status=status, search=search, limit=limit, page=page)
+        _output(result)
+    except JlcpcbAPIError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
+
+@parts.command("get")
+@click.argument("batch_no")
+@click.pass_obj
+def parts_get(ctx: CliContext, batch_no):
+    """Get full details for a parts order batch."""
+    try:
+        result = get_parts_order(ctx.client, batch_no)
         _output(result)
     except JlcpcbAPIError as e:
         click.echo(f"Error: {e}", err=True)

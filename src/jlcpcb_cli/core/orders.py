@@ -1,16 +1,9 @@
 """JLCPCB order data fetching and extraction."""
 
 import time
-from datetime import datetime, timezone
 
 from jlcpcb_cli.core.client import JlcpcbClient
-
-
-def _ms_to_iso(ms: int | None) -> str | None:
-    """Convert millisecond timestamp to ISO 8601 string."""
-    if ms is None:
-        return None
-    return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).isoformat()
+from jlcpcb_cli.core.util import ms_to_iso as _ms_to_iso
 
 
 def list_orders(
