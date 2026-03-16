@@ -112,14 +112,26 @@ class WebClient:
                 f"Secret key rejected (code={result.get('code')})"
             )
 
+    @staticmethod
+    def _check_success(result: dict) -> None:
+        """Raise on any non-success API response that wasn't a stale key."""
+        if "success" in result and not result["success"]:
+            code = result.get("code", "?")
+            msg = result.get("message") or result.get("msg") or "unknown error"
+            raise JlcpcbAPIError(
+                f"API error (code={code}): {msg}"
+            )
+
     def api_post(self, path: str, data: dict) -> dict:
         """Make an authenticated POST to a JLCPCB web API endpoint."""
         self._ensure_secret_key()
         try:
-            return self._do_api_post(path, data)
+            result = self._do_api_post(path, data)
         except _StaleSecretKeyError:
             self._refresh_secret_key()
-            return self._do_api_post(path, data)
+            result = self._do_api_post(path, data)
+        self._check_success(result)
+        return result
 
     def _do_api_post(self, path: str, data: dict) -> dict:
         result = self._http_request(
@@ -134,10 +146,12 @@ class WebClient:
         """Make an authenticated GET to a JLCPCB web API endpoint."""
         self._ensure_secret_key()
         try:
-            return self._do_api_get(path, params)
+            result = self._do_api_get(path, params)
         except _StaleSecretKeyError:
             self._refresh_secret_key()
-            return self._do_api_get(path, params)
+            result = self._do_api_get(path, params)
+        self._check_success(result)
+        return result
 
     def _do_api_get(self, path: str, params: dict[str, str] | None = None) -> dict:
         url = f"{BASE_URL}/api{path}"
