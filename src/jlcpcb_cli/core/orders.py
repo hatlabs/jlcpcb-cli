@@ -1,117 +1,115 @@
-"""JLCPCB order data via official API."""
+"""Order detail via JLCPCB web API."""
 
-from jlcpcb_cli.core.client import JlcpcbClient
+from jlcpcb_cli.core.web_client import WebClient
 
-PCB_ORDER_DETAIL_PATH = "/overseas/openapi/pcb/order/detail"
-PCB_WIP_PATH = "/overseas/openapi/pcb/wip/get"
+_ORDER_DETAIL_PATH = (
+    "/overseas-core-platform/orderCenter/selectPersonOrderDetail"
+)
+
+# orderType values in the web API
+_TYPE_PCB = 1
+_TYPE_SMT = 4
+_TYPE_3DP = 7
 
 
-def get_order(client: JlcpcbClient, batch_num: str) -> dict:
+def get_order(client: WebClient, batch_num: str) -> dict:
     """Get detailed order information for a batch."""
-    result = client.api_post(PCB_ORDER_DETAIL_PATH, {"batchNum": batch_num})
-    return _extract_order(batch_num, result["data"])
-
-
-def _extract_order(batch_num: str, data: dict) -> dict:
-    """Extract structured order data from the API response."""
-    address = data.get("orderAddress") or {}
-    items = data.get("orderItem") or []
-
+    result = client.api_get(_ORDER_DETAIL_PATH, {"batchNum": batch_num})
+    items = (result.get("data") or {}).get("unionOrderDetailVOList") or []
     return {
         "batchNum": batch_num,
-        "shippingMethod": data.get("shippingMethod"),
-        "paymentMethod": data.get("paymentMethod"),
-        "totalProduct": data.get("totalDummyMoney"),
-        "totalShipping": data.get("totalCarriageMoney"),
-        "totalOrder": data.get("totalMoney"),
-        "address": {
-            "company": address.get("companyName"),
-            "street": address.get("linkAddress"),
-            "city": address.get("city"),
-            "province": address.get("province"),
-            "postalCode": address.get("postalCode"),
-            "country": address.get("country"),
-        },
-        "orders": [_extract_order_item(item) for item in items],
+        "orders": [_extract_order(item) for item in items],
     }
 
 
-def _extract_order_item(item: dict) -> dict:
-    """Extract a single order item (PCB or SMT)."""
+def _extract_order(item: dict) -> dict:
     order_type = item.get("orderType")
-    pcb = item.get("pcbItem") or {}
-    smt = item.get("smtItem") or {}
+    rd = item.get("recordsDetail") or {}
+    detail = rd.get("detail") or {}
 
-    if order_type == 1 and pcb.get("produceCode"):
-        return _extract_pcb_item(pcb)
-    elif smt.get("produceCode"):
-        return _extract_smt_item(smt)
-    else:
-        return _extract_pcb_item(pcb)
+    base = {
+        "orderCode": rd.get("produceCode") or item.get("orderCode"),
+        "orderType": _type_label(order_type),
+        "status": rd.get("orderStatus"),
+        "fileName": rd.get("orderFileName"),
+        "quantity": rd.get("stencilNumber"),
+        "orderDate": rd.get("orderDate"),
+        "produceTime": rd.get("produceTime"),
+        "deliveryTime": rd.get("deliveryTime"),
+        "weight": rd.get("weight"),
+        "productCost": rd.get("dummyMoney"),
+        "shippingCost": rd.get("carriageMoney"),
+        "totalCost": rd.get("paiclMoney"),
+        "shippingMethod": rd.get("freightModeName"),
+        "trackingNumber": rd.get("expressNo"),
+        "paymentMethod": rd.get("paymentMode"),
+        "fileUrl": rd.get("orderFileUrl"),
+    }
+
+    pcb = detail.get("pcbDetail")
+    smt = detail.get("smtDetail")
+
+    if pcb and order_type == _TYPE_PCB:
+        base["specs"] = _extract_pcb_specs(pcb)
+        base["costBreakdown"] = _extract_cost_breakdown(detail.get("orderCountTolls"))
+    elif smt and order_type == _TYPE_SMT:
+        base["specs"] = _extract_smt_specs(smt)
+        base["orderCode"] = smt.get("smtOrderCode") or base["orderCode"]
+
+    return base
 
 
-def _extract_pcb_item(pcb: dict) -> dict:
-    """Extract PCB order details."""
+def _extract_pcb_specs(pcb: dict) -> dict:
     return {
-        "orderType": "pcb",
-        "produceCode": pcb.get("produceCode"),
-        "fileName": pcb.get("fileName"),
-        "status": _order_status(pcb.get("orderStatus")),
-        "quantity": pcb.get("count"),
-        "orderDate": pcb.get("orderDate"),
-        "deliveryTime": pcb.get("deliveryTime"),
-        "buildTime": pcb.get("buildTime"),
-        "price": pcb.get("price"),
-        "fileUrl": pcb.get("orderFileUrl"),
-        "specs": {
-            "layers": pcb.get("layer"),
-            "thickness": pcb.get("thickness"),
-            "width": pcb.get("width"),
-            "length": pcb.get("length"),
-            "soldermaskColor": pcb.get("pcbColor"),
-            "surfaceFinish": pcb.get("surfaceFinish"),
-            "copperWeight": pcb.get("copperWeight"),
-            "innerCopperWeight": pcb.get("insideCuprumThickness"),
-            "material": pcb.get("materialDetails"),
-            "panelized": bool(pcb.get("panelFlag")),
-            "differentDesigns": pcb.get("differentDesign"),
-            "halfHoles": pcb.get("halfHole"),
-            "goldFinger": pcb.get("goldFinger"),
-        },
+        "layers": pcb.get("stencilLayer"),
+        "thickness": pcb.get("stencilPly"),
+        "width": pcb.get("stencilWidth"),
+        "length": pcb.get("stencilLength"),
+        "quantity": pcb.get("stencilCounts"),
+        "soldermaskColor": pcb.get("adornColor"),
+        "silkscreenColor": pcb.get("charFontColor"),
+        "surfaceFinish": pcb.get("adornPut"),
+        "copperWeight": pcb.get("cuprumThickness"),
+        "innerCopperWeight": pcb.get("insideCuprumThickness"),
+        "material": pcb.get("showTagValue"),
+        "impedanceControl": pcb.get("impedanceFlag") == "yes",
+        "goldFingerBevel": pcb.get("goldFingerBevel"),
+        "goldThickness": pcb.get("goldThickness"),
+        "halfHole": pcb.get("halfHole") == "yes",
+        "panelX": pcb.get("panelX"),
+        "panelY": pcb.get("panelY"),
+        "panelType": pcb.get("stencilType"),
     }
 
 
-def _extract_smt_item(smt: dict) -> dict:
-    """Extract SMT order details."""
+def _extract_smt_specs(smt: dict) -> dict:
     return {
-        "orderType": "smt",
-        "produceCode": smt.get("produceCode"),
-        "fileName": smt.get("fileName"),
-        "status": _order_status(smt.get("orderStatus")),
-        "quantity": smt.get("count"),
-        "orderDate": smt.get("orderDate"),
-        "deliveryTime": smt.get("deliveryTime"),
-        "buildTime": smt.get("buildTime"),
-        "price": smt.get("price"),
-        "fileUrl": smt.get("orderFileUrl"),
-        "specs": {
-            "width": smt.get("width"),
-            "length": smt.get("length"),
-            "stencilSide": smt.get("stencilSide"),
-        },
+        "pcbOrderCode": smt.get("produceOrderCode"),
+        "pasteCount": smt.get("pasteNumber"),
+        "patchSide": smt.get("patchLocation"),
+        "bomFile": smt.get("bomFileName"),
+        "posFile": smt.get("coordinateFileName"),
     }
 
 
-def _order_status(code: int | None) -> str:
-    """Map numeric order status to label."""
-    labels = {
-        1: "unpaid",
-        2: "pending_review",
-        3: "in_production",
-        4: "shipped",
-        5: "completed",
-        6: "cancelled",
+def _extract_cost_breakdown(tolls: dict | None) -> dict | None:
+    if not tolls:
+        return None
+    return {
+        "pcbCost": tolls.get("projectMoney"),
+        "surfaceFinishCost": tolls.get("adornPutMoney"),
+        "stencilCost": tolls.get("stencilMoney"),
+        "testCost": tolls.get("testsMoney"),
+        "subtotal": tolls.get("dummyMoney"),
+        "shippingCost": tolls.get("carriageMoney"),
+        "total": tolls.get("paiclMoney"),
+        "discount": tolls.get("discountMoney"),
     }
-    if code is None:
-        return "unknown"
-    return labels.get(code, f"unknown({code})")
+
+
+def _type_label(code: int | None) -> str:
+    return {
+        _TYPE_PCB: "pcb",
+        _TYPE_SMT: "smt",
+        _TYPE_3DP: "3dp",
+    }.get(code, f"unknown({code})")

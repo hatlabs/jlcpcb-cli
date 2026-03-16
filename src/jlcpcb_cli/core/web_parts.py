@@ -58,7 +58,7 @@ def get_parts_order(client: WebClient, batch_no: str) -> dict:
     batch = next((b for b in batches if b.get("orderBatchNo") == batch_no), None)
 
     if batch is None:
-        from jlcpcb_cli.core.client import JlcpcbAPIError
+        from jlcpcb_cli.core.web_client import JlcpcbAPIError
         raise JlcpcbAPIError(f"Parts order batch {batch_no} not found")
 
     return _extract_parts_batch_detail(batch)
