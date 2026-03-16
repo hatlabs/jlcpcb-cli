@@ -1,9 +1,9 @@
-"""Parts order history via JLCPCB web API (browser-based).
+"""Parts order history via JLCPCB web API.
 
 The official API doesn't have parts order endpoints.
 """
 
-from jlcpcb_cli.core.browser import BrowserClient
+from jlcpcb_cli.core.web_client import WebClient
 
 
 _PARTS_ORDER_PATH = (
@@ -13,7 +13,7 @@ _PARTS_ORDER_PATH = (
 
 
 def list_parts_orders(
-    browser: BrowserClient,
+    client: WebClient,
     *,
     status: str | None = None,
     search: str | None = None,
@@ -29,7 +29,7 @@ def list_parts_orders(
         "orderStatus": _map_status(status),
     }
 
-    result = browser.api_post(_PARTS_ORDER_PATH, data)
+    result = client.api_post(_PARTS_ORDER_PATH, data)
     page_data = result.get("data") or {}
     batches = page_data.get("list") or []
 
@@ -43,7 +43,7 @@ def list_parts_orders(
     }
 
 
-def get_parts_order(browser: BrowserClient, batch_no: str) -> dict:
+def get_parts_order(client: WebClient, batch_no: str) -> dict:
     """Get detailed parts order info for a batch."""
     data = {
         "pageNum": 1,
@@ -53,7 +53,7 @@ def get_parts_order(browser: BrowserClient, batch_no: str) -> dict:
         "orderStatus": "",
     }
 
-    result = browser.api_post(_PARTS_ORDER_PATH, data)
+    result = client.api_post(_PARTS_ORDER_PATH, data)
     batches = (result.get("data") or {}).get("list") or []
     batch = next((b for b in batches if b.get("orderBatchNo") == batch_no), None)
 

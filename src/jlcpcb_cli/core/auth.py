@@ -33,8 +33,8 @@ def load_browser_cookies() -> list[dict]:
 def login() -> None:
     """Launch browser for interactive JLCPCB login.
 
-    Saves all browser cookies (including httpOnly) to a JSON file
-    that the headless browser client can load.
+    Saves all cookies (including httpOnly) to a JSON file
+    that the HTTP client can load for subsequent API calls.
     """
     from playwright.sync_api import sync_playwright
 
@@ -71,7 +71,9 @@ def login() -> None:
                 context.clear_cookies()
                 context.add_cookies(cookies)
 
-            print(f"Login successful. {len(cookies)} cookies persisted.")
+            # Save cookies to JSON for the HTTP client
+            save_browser_cookies(cookies)
+            print(f"Login successful. {len(cookies)} cookies saved.")
         finally:
             context.close()
 

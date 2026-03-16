@@ -26,7 +26,7 @@ Login via Google/Apple/password in a real Chrome window:
 jlcpcb-cli login
 ```
 
-Session cookies are persisted to `~/.jlcpcb-cli/cookies.txt`. Re-run `login` when the session expires.
+Session cookies are persisted to `~/.jlcpcb-cli/browser-cookies.json`. Re-run `login` when the session expires.
 
 ## Usage
 
@@ -65,5 +65,4 @@ JLCPCB groups orders into **batches** (prefixed `W`). A batch may contain multip
 ## Requirements
 
 - Python 3.10+
-- Google Chrome (for login)
-- Playwright (`pip install playwright`)
+- Playwright (only for `jlcpcb-cli login`): `pip install jlcpcb-cli[login]`

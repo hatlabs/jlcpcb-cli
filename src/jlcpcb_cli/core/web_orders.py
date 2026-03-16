@@ -1,16 +1,16 @@
-"""Order listing via JLCPCB web API (browser-based).
+"""Order listing via JLCPCB web API.
 
 The official API only supports order detail by batch number.
-Order listing requires the web API, accessed through a headless browser.
+Order listing requires the web API, accessed via direct HTTP.
 """
 
 import time
 
-from jlcpcb_cli.core.browser import BrowserClient
+from jlcpcb_cli.core.web_client import WebClient
 
 
 def list_orders(
-    browser: BrowserClient,
+    client: WebClient,
     *,
     status: str | None = None,
     search: str | None = None,
@@ -36,7 +36,7 @@ def list_orders(
         "prevBatchNum": None,
     }
 
-    result = browser.api_post(
+    result = client.api_post(
         "/overseas-core-platform/orderCenter/selectPersonBatch", data
     )
 
