@@ -5,17 +5,12 @@ import sys
 
 import click
 
-from jlcpcb_cli.core.client import JlcpcbClient, JlcpcbAPIError
-from jlcpcb_cli.core.orders import get_order
-from jlcpcb_cli.core.parts import list_components
 from jlcpcb_cli.core.web_client import get_web_client
+from jlcpcb_cli.core.orders import get_order
+from jlcpcb_cli.core.parts import list_inventory
 from jlcpcb_cli.core.web_orders import list_orders
 from jlcpcb_cli.core.web_parts import list_parts_orders, get_parts_order
 from jlcpcb_cli.core import auth
-
-
-def _client() -> JlcpcbClient:
-    return JlcpcbClient()
 
 
 def _output(data) -> None:
@@ -31,7 +26,7 @@ def cli(json_output):
 
 @cli.command()
 def login():
-    """Login to JLCPCB via browser (for order listing)."""
+    """Login to JLCPCB via browser."""
     auth.login()
 
 
@@ -52,7 +47,7 @@ def orders():
 @click.option("--limit", default=15, type=int, help="Results per page.")
 @click.option("--page", default=1, type=int, help="Page number.")
 def orders_list(status, search, limit, page):
-    """List order batches (requires login)."""
+    """List order batches."""
     try:
         result = list_orders(
             get_web_client(), status=status, search=search, limit=limit, page=page
@@ -66,30 +61,33 @@ def orders_list(status, search, limit, page):
 @orders.command("get")
 @click.argument("batch_num")
 def orders_get(batch_num):
-    """Get full details for an order batch (via official API)."""
+    """Get full details for an order batch."""
     try:
-        result = get_order(_client(), batch_num)
+        result = get_order(get_web_client(), batch_num)
         _output(result)
-    except JlcpcbAPIError as e:
+    except Exception as e:
         click.echo(f"Error: {e}", err=True)
         sys.exit(1)
 
 
 @cli.group()
 def parts():
-    """Parts Manager: library and order history."""
+    """Parts Manager: inventory and order history."""
     pass
 
 
-@parts.command("list")
+@parts.command("inventory")
+@click.option("--search", default="", help="Search by keyword.")
 @click.option("--limit", default=30, type=int, help="Results per page.")
 @click.option("--page", default=1, type=int, help="Page number.")
-def parts_list(limit, page):
-    """List components from the JLCPCB library (via official API)."""
+def parts_inventory(search, limit, page):
+    """List components stored at JLCPCB."""
     try:
-        result = list_components(_client(), page=page, limit=limit)
+        result = list_inventory(
+            get_web_client(), search=search, page=page, limit=limit
+        )
         _output(result)
-    except JlcpcbAPIError as e:
+    except Exception as e:
         click.echo(f"Error: {e}", err=True)
         sys.exit(1)
 
@@ -105,7 +103,7 @@ def parts_list(limit, page):
 @click.option("--limit", default=25, type=int, help="Results per page.")
 @click.option("--page", default=1, type=int, help="Page number.")
 def parts_list_orders(status, search, limit, page):
-    """List parts purchase order batches (requires login)."""
+    """List parts purchase order batches."""
     try:
         result = list_parts_orders(
             get_web_client(), status=status, search=search, limit=limit, page=page
@@ -119,7 +117,7 @@ def parts_list_orders(status, search, limit, page):
 @parts.command("get-order")
 @click.argument("batch_no")
 def parts_get_order(batch_no):
-    """Get full details for a parts order batch (requires login)."""
+    """Get full details for a parts order batch."""
     try:
         result = get_parts_order(get_web_client(), batch_no)
         _output(result)
