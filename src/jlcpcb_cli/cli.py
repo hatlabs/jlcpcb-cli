@@ -95,7 +95,7 @@ def parts_inventory(search, limit, page):
 @parts.command("list-orders")
 @click.option(
     "--status",
-    type=click.Choice(["all", "paid", "unpaid", "cancelled", "completed"]),
+    type=click.Choice(["all", "in_progress", "unpaid", "cancelled", "completed"]),
     default="all",
     help="Filter by order status.",
 )
