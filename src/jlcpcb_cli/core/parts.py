@@ -1,214 +1,47 @@
-"""JLCPCB Parts Manager: library inventory and order data."""
-
-import time
-import urllib.parse
+"""JLCPCB Components API — public and private library."""
 
 from jlcpcb_cli.core.client import JlcpcbClient
-from jlcpcb_cli.core.util import ms_to_iso
 
-_API_PREFIX = (
-    "/api/overseas-smt-component-order-platform/v1"
-    "/overseasSmtComponentOrder"
-)
-
-PARTS_ORDER_LIST_PATH = f"{_API_PREFIX}/presaleOrder/selectPresaleOrderList"
-PARTS_LIBRARY_PATH = f"{_API_PREFIX}/myLibrary/getCustomerComponentStock"
+COMPONENT_INFO_PATH = "/overseas/openapi/component/getComponentInfos"
 
 
-def list_library(
+def list_components(
     client: JlcpcbClient,
     *,
-    search: str | None = None,
     page: int = 1,
     limit: int = 30,
 ) -> dict:
-    """List components in the parts library (inventory stored at JLCPCB)."""
-    params = {
-        "pageNum": page,
-        "pageSize": limit,
-        "keyWord": search or "",
-        "_t": int(time.time() * 1000),
-    }
+    """List components from the JLCPCB component library."""
+    result = client.api_post(
+        COMPONENT_INFO_PATH, {"pageNum": page, "pageSize": limit}
+    )
 
-    result = client.api_get(PARTS_LIBRARY_PATH, params)
-    page_data = result["data"]
-    items = page_data.get("list") or []
-
-    return {
-        "pagination": {
-            "page": page_data.get("pageNum", page),
-            "pageSize": page_data.get("pageSize", limit),
-            "total": page_data.get("total", 0),
-            "pages": page_data.get("pages", 0),
-        },
-        "components": [_extract_library_item(item) for item in items],
-    }
-
-
-def _extract_library_item(item: dict) -> dict:
-    """Extract a component from the library inventory."""
-    return {
-        "componentCode": item.get("componentCode"),
-        "model": item.get("componentModel"),
-        "brand": item.get("componentBrand"),
-        "type": item.get("componentType"),
-        "spec": item.get("componentSpecification"),
-        "description": item.get("description"),
-        "stockCount": item.get("privateStockCount"),
-        "rohs": bool(item.get("rohsFlag")),
-    }
-
-
-def list_parts_orders(
-    client: JlcpcbClient,
-    *,
-    status: str | None = None,
-    search: str | None = None,
-    page: int = 1,
-    limit: int = 25,
-) -> dict:
-    """List parts order batches with pagination."""
-    data = {
-        "pageNum": page,
-        "pageSize": limit,
-        "orderType": None,
-        "keyword": search or "",
-        "orderStatus": _map_status_filter(status),
-    }
-
-    result = client.api_post(PARTS_ORDER_LIST_PATH, data)
-    page_data = result["data"]
-    batches = page_data.get("list") or []
+    data = result["data"]
+    items = data.get("componentInfos") or []
 
     return {
         "pagination": {
             "page": page,
             "pageSize": limit,
-            "total": page_data.get("total", 0),
+            "total": len(items),  # API doesn't return total count
         },
-        "orders": [_extract_parts_batch(b) for b in batches],
+        "components": [_extract_component(c) for c in items],
     }
 
 
-def get_parts_order(client: JlcpcbClient, batch_no: str) -> dict:
-    """Get detailed parts order information for a batch.
-
-    Fetches the full list and filters to the requested batch,
-    since there is no single-batch detail endpoint.
-    """
-    # Fetch all (typically <20 batches total)
-    data = {
-        "pageNum": 1,
-        "pageSize": 100,
-        "orderType": None,
-        "keyword": "",
-        "orderStatus": "",
-    }
-
-    result = client.api_post(PARTS_ORDER_LIST_PATH, data)
-    batches = result["data"].get("list") or []
-
-    batch = next((b for b in batches if b.get("orderBatchNo") == batch_no), None)
-    if batch is None:
-        from jlcpcb_cli.core.client import JlcpcbAPIError
-        raise JlcpcbAPIError(f"Parts order batch {batch_no} not found")
-
-    return _extract_parts_batch_detail(batch)
-
-
-def _map_status_filter(status: str | None) -> str:
-    """Map CLI status names to API orderStatus values."""
-    if status is None or status == "all":
-        return ""
-    mapping = {
-        "paid": "paySuccess",
-        "unpaid": "waitPay",
-        "cancelled": "cancelled",
-        "completed": "completed",
-    }
-    return mapping.get(status, "")
-
-
-def _extract_parts_batch(batch: dict) -> dict:
-    """Extract a summary from a parts order batch."""
-    stock_list = batch.get("stockList") or []
-    total_paid = sum(s.get("paidMoney") or 0 for s in stock_list)
-    total_items = sum(
-        len(s.get("presaleGoodsRecords") or []) for s in stock_list
-    )
-
+def _extract_component(comp: dict) -> dict:
+    """Extract component info from API response."""
     return {
-        "orderBatchNo": batch.get("orderBatchNo"),
-        "date": ms_to_iso(batch.get("createTime")),
-        "partsOrderCount": len(stock_list),
-        "componentCount": total_items,
-        "totalPaid": round(total_paid, 2),
+        "lcscPart": comp.get("lcscPart"),
+        "mfrPart": comp.get("mfrPart"),
+        "manufacturer": comp.get("manufacturer"),
+        "category": comp.get("firstCategory"),
+        "subcategory": comp.get("secondCategory"),
+        "package": comp.get("package"),
+        "solderJoints": comp.get("solderJoint"),
+        "libraryType": comp.get("libraryType"),
+        "description": comp.get("description"),
+        "stock": comp.get("stock"),
+        "price": comp.get("price"),
+        "datasheet": comp.get("datasheet"),
     }
-
-
-def _extract_parts_batch_detail(batch: dict) -> dict:
-    """Extract full detail from a parts order batch."""
-    stock_list = batch.get("stockList") or []
-
-    return {
-        "orderBatchNo": batch.get("orderBatchNo"),
-        "date": ms_to_iso(batch.get("createTime")),
-        "partsOrders": [_extract_parts_order(s) for s in stock_list],
-    }
-
-
-def _extract_parts_order(stock: dict) -> dict:
-    """Extract a single parts order from the stockList."""
-    goods = stock.get("presaleGoodsRecords") or []
-
-    return {
-        "presaleOrderNo": stock.get("presaleOrderNo"),
-        "orderStatus": _status_label(stock.get("orderStatus")),
-        "payStatus": stock.get("payStatus"),
-        "paidMoney": stock.get("paidMoney"),
-        "presaleType": stock.get("presaleType"),
-        "paymentMethod": stock.get("paymentTypeCode"),
-        "paymentTime": ms_to_iso(stock.get("paymentTime")),
-        "completionTime": ms_to_iso(stock.get("completionTime")),
-        "shipmentNumber": stock.get("shipmentNumber"),
-        "components": [_extract_component(g) for g in goods],
-    }
-
-
-def _extract_component(goods: dict) -> dict:
-    """Extract component detail from a presaleGoodsRecord."""
-    return {
-        "componentCode": goods.get("componentCode"),
-        "name": goods.get("componentName"),
-        "model": goods.get("componentModel"),
-        "brand": goods.get("componentBrand"),
-        "spec": goods.get("componentSpecification"),
-        "description": goods.get("description"),
-        "quantity": goods.get("presaleNumber"),
-        "unitPrice": goods.get("goodsPrice"),
-        "totalMoney": goods.get("goodsMoney"),
-        "paidMoney": goods.get("goodsPaidMoney"),
-        "inStorageNumber": goods.get("inStorageNumber"),
-        "status": _goods_status_label(goods.get("goodsStatus")),
-    }
-
-
-def _status_label(code: int | None) -> str:
-    """Map orderStatus numeric code to a label."""
-    labels = {
-        10: "unpaid",
-        20: "paid",
-        30: "completed",
-        40: "cancelled",
-    }
-    return labels.get(code, f"unknown({code})")
-
-
-def _goods_status_label(code: int | None) -> str:
-    """Map goodsStatus numeric code to a label."""
-    labels = {
-        10: "pending",
-        20: "in_storage",
-        30: "cancelled",
-    }
-    return labels.get(code, f"unknown({code})")

@@ -1,16 +1,17 @@
-"""JLCPCB HTTP client with cookie-based authentication."""
+"""JLCPCB official API client with HMAC-SHA256 request signing."""
 
-import http.cookiejar
+import base64
+import hashlib
+import hmac
 import json
+import os
+import random
+import string
+import time
 import urllib.error
-import urllib.parse
 import urllib.request
-import uuid
-from dataclasses import dataclass, field
 
-from jlcpcb_cli.core import auth
-
-BASE_URL = "https://jlcpcb.com"
+BASE_URL = "https://open.jlcpcb.com"
 
 
 class JlcpcbAPIError(Exception):
@@ -21,119 +22,79 @@ class JlcpcbAPIError(Exception):
         self.status_code = status_code
 
 
-def _hex_encode_uuid(u: str) -> str:
-    """Hex-encode a UUID string (each byte of the ASCII representation)."""
-    return u.encode("ascii").hex()
+def _nonce(length: int = 32) -> str:
+    """Generate a random nonce string."""
+    chars = string.ascii_letters + string.digits
+    return "".join(random.choice(chars) for _ in range(length))
 
 
-@dataclass
+def _sign(secret_key: str, method: str, path: str, timestamp: str, nonce: str, body: str) -> str:
+    """Generate HMAC-SHA256 signature for the request."""
+    string_to_sign = f"{method}\n{path}\n{timestamp}\n{nonce}\n{body}\n"
+    sig = hmac.new(
+        secret_key.encode(), string_to_sign.encode(), hashlib.sha256
+    ).digest()
+    return base64.b64encode(sig).decode()
+
+
 class JlcpcbClient:
-    cookie_jar: http.cookiejar.MozillaCookieJar = field(default_factory=auth.load_cookies)
-    _opener: urllib.request.OpenerDirector | None = field(
-        default=None, init=False, repr=False
-    )
-    _secret_key: str | None = field(default=None, init=False, repr=False)
+    """JLCPCB API client using the official open API."""
 
-    @property
-    def opener(self) -> urllib.request.OpenerDirector:
-        if self._opener is None:
-            cookie_handler = urllib.request.HTTPCookieProcessor(self.cookie_jar)
-            self._opener = urllib.request.build_opener(cookie_handler)
-        return self._opener
+    def __init__(
+        self,
+        app_id: str | None = None,
+        access_key: str | None = None,
+        secret_key: str | None = None,
+    ):
+        self.app_id = app_id or os.environ.get("JLCPCB_APP_ID", "")
+        self.access_key = access_key or os.environ.get("JLCPCB_ACCESS_KEY", "")
+        self.secret_key = secret_key or os.environ.get("JLCPCB_SECRET_KEY", "")
 
-    @property
-    def xsrf_token(self) -> str | None:
-        return auth.get_xsrf_token(self.cookie_jar)
+        if not all([self.app_id, self.access_key, self.secret_key]):
+            raise JlcpcbAPIError(
+                "Missing API credentials. Set JLCPCB_APP_ID, JLCPCB_ACCESS_KEY, "
+                "and JLCPCB_SECRET_KEY environment variables."
+            )
 
-    def _ensure_session(self) -> None:
-        """Check session validity and refresh XSRF token if needed."""
-        if not auth.has_valid_session(self.cookie_jar):
-            self._session_expired()
-        if self.xsrf_token is None:
-            self._refresh_xsrf_token()
+    def api_post(self, path: str, data: dict) -> dict:
+        """Make a signed POST request to the JLCPCB API."""
+        timestamp = str(int(time.time()))
+        nonce = _nonce()
+        body = json.dumps(data)
 
-    def _refresh_xsrf_token(self) -> None:
-        """Refresh the XSRF token by visiting the JLCPCB site.
+        signature = _sign(self.secret_key, "POST", path, timestamp, nonce, body)
 
-        The XSRF-TOKEN cookie expires every ~30 minutes, but the
-        JLCPCB_SESSION_ID is long-lived. A simple GET to the site
-        with the session cookie triggers the server to set a fresh
-        XSRF-TOKEN cookie.
-        """
-        import sys
-
-        print("Refreshing XSRF token...", file=sys.stderr)
-
-        headers = {
-            "User-Agent": "jlcpcb-cli/0.1.0",
-            "Accept": "text/html",
-        }
-        req = urllib.request.Request(
-            f"{BASE_URL}/user-center/orders/", headers=headers
+        auth = (
+            f'JOP appid="{self.app_id}",'
+            f'accesskey="{self.access_key}",'
+            f'nonce="{nonce}",'
+            f'timestamp="{timestamp}",'
+            f'signature="{signature}"'
         )
 
-        try:
-            with self.opener.open(req, timeout=30) as resp:
-                resp.read()  # consume body to complete the request
-        except urllib.error.HTTPError as e:
-            if e.code in (302, 401, 403):
-                self._session_expired()
-            raise JlcpcbAPIError(
-                f"Token refresh failed: HTTP {e.code}", status_code=e.code
-            ) from e
-        except urllib.error.URLError as e:
-            raise JlcpcbAPIError(f"Token refresh failed: {e.reason}") from e
-
-        # The opener's cookie processor should have captured the new XSRF-TOKEN
-        if self.xsrf_token is None:
-            self._session_expired()
-
-        # Invalidate secret key since it was tied to the old XSRF token
-        self._invalidate_secret_key()
-
-        # Persist the refreshed cookies
-        auth.save_cookies(self.cookie_jar)
-
-    def _get_secret_key(self) -> str:
-        """Obtain a secret key from the JLCPCB API.
-
-        The protocol:
-        1. Generate a random UUID, hex-encode it
-        2. POST to /api/overseas-core-platform/secret/update with {"keyId": hex_uuid}
-        3. Use the RESPONSE keyId (different from what we sent) as the secretkey header
-        """
-        if self._secret_key is not None:
-            return self._secret_key
-
-        key_id = _hex_encode_uuid(str(uuid.uuid4()))
-
-        headers = {
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "User-Agent": "jlcpcb-cli/0.1.0",
-            "Referer": "https://jlcpcb.com/user-center/orders/",
-        }
-
-        xsrf = self.xsrf_token
-        if xsrf:
-            headers["x-xsrf-token"] = xsrf
-
-        body = json.dumps({"keyId": key_id}).encode()
         req = urllib.request.Request(
-            f"{BASE_URL}/api/overseas-core-platform/secret/update",
-            data=body,
-            headers=headers,
+            BASE_URL + path,
+            data=body.encode(),
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": auth,
+            },
             method="POST",
         )
 
         try:
-            with self.opener.open(req, timeout=30) as resp:
+            with urllib.request.urlopen(req, timeout=30) as resp:
                 result = json.loads(resp.read().decode())
         except urllib.error.HTTPError as e:
-            if e.code in (302, 401, 403):
-                self._session_expired()
+            try:
+                err = json.loads(e.read().decode())
+                msg = err.get("message", f"HTTP {e.code}")
+                code = err.get("code", e.code)
+            except Exception:
+                msg = f"HTTP {e.code}"
+                code = e.code
             raise JlcpcbAPIError(
-                f"secret/update failed: HTTP {e.code}", status_code=e.code
+                f"API error: {msg} (code={code})", status_code=e.code
             ) from e
         except urllib.error.URLError as e:
             raise JlcpcbAPIError(f"Connection error: {e.reason}") from e
@@ -141,173 +102,31 @@ class JlcpcbClient:
         if not result.get("success"):
             code = result.get("code")
             msg = result.get("message", "unknown error")
-            raise JlcpcbAPIError(f"secret/update failed: {msg} (code={code})")
+            raise JlcpcbAPIError(f"API error: {msg} (code={code})")
 
-        self._secret_key = result["data"]["keyId"]
-        return self._secret_key
-
-    def _invalidate_secret_key(self) -> None:
-        """Invalidate the cached secret key, forcing re-acquisition."""
-        self._secret_key = None
-
-    def api_post(self, path: str, data: dict) -> dict:
-        """Make an authenticated POST request to a JLCPCB API endpoint.
-
-        Handles the secret key protocol, XSRF token refresh, and
-        auto-logout recovery automatically.
-        """
-        self._ensure_session()
-        try:
-            return self._do_api_post(path, data)
-        except JlcpcbAPIError as e:
-            if e.status_code in (302, 401, 403):
-                self._session_expired()
-            # Retry once on secret key expiry (code 29003) or
-            # auto-logout (code 460) — refresh tokens and retry
-            if "29003" in str(e) or "code=460" in str(e):
-                self._refresh_xsrf_token()
-                return self._do_api_post(path, data)
-            raise
-
-    def api_get(self, path: str, params: dict | None = None) -> dict:
-        """Make an authenticated GET request to a JLCPCB API endpoint."""
-        self._ensure_session()
-        try:
-            return self._do_api_get(path, params)
-        except JlcpcbAPIError as e:
-            if e.status_code in (302, 401, 403):
-                self._session_expired()
-            if "29003" in str(e) or "code=460" in str(e):
-                self._refresh_xsrf_token()
-                return self._do_api_get(path, params)
-            raise
-
-    def _do_api_get(self, path: str, params: dict | None = None) -> dict:
-        """Execute an authenticated GET request."""
-        url = f"{BASE_URL}{path}"
-        if params:
-            url = f"{url}?{urllib.parse.urlencode(params)}"
-
-        headers = {
-            "Accept": "application/json",
-            "User-Agent": "jlcpcb-cli/0.1.0",
-            "Referer": "https://jlcpcb.com/user-center/orders/",
-        }
-
-        xsrf = self.xsrf_token
-        if xsrf:
-            headers["x-xsrf-token"] = xsrf
-
-        secret_key = self._get_secret_key()
-        headers["secretkey"] = secret_key
-
-        req = urllib.request.Request(url, headers=headers)
-
-        try:
-            with self.opener.open(req, timeout=30) as resp:
-                result = json.loads(resp.read().decode())
-        except urllib.error.HTTPError as e:
-            if e.code in (302, 401, 403):
-                self._session_expired()
-            raise JlcpcbAPIError(
-                f"HTTP {e.code}", status_code=e.code
-            ) from e
-        except urllib.error.URLError as e:
-            raise JlcpcbAPIError(f"Connection error: {e.reason}") from e
-
-        self._check_result(result)
         return result
-
-    def _do_api_post(self, path: str, data: dict) -> dict:
-        """Execute an authenticated POST request."""
-        url = f"{BASE_URL}{path}"
-
-        headers = {
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "User-Agent": "jlcpcb-cli/0.1.0",
-            "Referer": "https://jlcpcb.com/user-center/orders/",
-        }
-
-        xsrf = self.xsrf_token
-        if xsrf:
-            headers["x-xsrf-token"] = xsrf
-
-        secret_key = self._get_secret_key()
-        headers["secretkey"] = secret_key
-
-        body = json.dumps(data).encode()
-        req = urllib.request.Request(url, data=body, headers=headers, method="POST")
-
-        try:
-            with self.opener.open(req, timeout=30) as resp:
-                result = json.loads(resp.read().decode())
-        except urllib.error.HTTPError as e:
-            if e.code in (302, 401, 403):
-                self._session_expired()
-            raise JlcpcbAPIError(
-                f"HTTP {e.code}", status_code=e.code
-            ) from e
-        except urllib.error.URLError as e:
-            raise JlcpcbAPIError(f"Connection error: {e.reason}") from e
-
-        self._check_result(result)
-        return result
-
-    @staticmethod
-    def _check_result(result: dict) -> None:
-        """Validate an API response.
-
-        JLCPCB uses two response formats:
-        - Order APIs: {"success": true/false, "code": 200, "message": "..."}
-        - Parts APIs: {"code": 200, "msg": "...", "data": ...}
-        """
-        # Format 1: explicit success field
-        if "success" in result:
-            if not result["success"]:
-                code = result.get("code")
-                msg = result.get("message", "unknown error")
-                raise JlcpcbAPIError(f"API error: {msg} (code={code})")
-            return
-
-        # Format 2: code-only (200 = success)
-        code = result.get("code")
-        if code == 200:
-            return
-
-        msg = result.get("msg") or result.get("message", "unknown error")
-        raise JlcpcbAPIError(f"API error: {msg} (code={code})")
 
     def download_file(self, path: str, output_path: "Path") -> None:
-        """Download a file from JLCPCB to disk."""
+        """Download a file from JLCPCB."""
         from pathlib import Path
         output_path = Path(output_path)
 
-        self._ensure_session()
+        url = path if path.startswith("http") else f"https://jlcpcb.com{path}"
 
-        url = f"{BASE_URL}{path}" if path.startswith("/") else path
-
-        headers = {
+        req = urllib.request.Request(url, headers={
             "User-Agent": "jlcpcb-cli/0.1.0",
-            "Referer": "https://jlcpcb.com/user-center/orders/",
-        }
-
-        req = urllib.request.Request(url, headers=headers)
+        })
 
         try:
-            with self.opener.open(req, timeout=60) as resp:
+            with urllib.request.urlopen(req, timeout=60) as resp:
                 output_path.write_bytes(resp.read())
         except urllib.error.HTTPError as e:
-            if e.code in (302, 401, 403):
-                self._session_expired()
             raise JlcpcbAPIError(
                 f"Download failed: HTTP {e.code}", status_code=e.code
             ) from e
         except urllib.error.URLError as e:
             raise JlcpcbAPIError(f"Download failed: {e.reason}") from e
 
-    def _session_expired(self) -> None:
-        """Raise an error indicating session expiry."""
-        raise JlcpcbAPIError(
-            "Session expired. Run 'jlcpcb-cli login' to re-authenticate."
-        )
+    def close(self) -> None:
+        """No-op — kept for interface compatibility."""
+        pass
