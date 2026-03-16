@@ -1,8 +1,8 @@
 # jlcpcb-cli
 
-Command-line interface to JLCPCB order data. Retrieves order history, PCB/SMT/3DP order details, and cost breakdowns via JLCPCB's internal API.
+Command-line interface to JLCPCB order data. Retrieves order history, PCB/SMT/3DP order details, cost breakdowns, and personal parts inventory via JLCPCB's web API.
 
-No official API exists — this tool reverse-engineers the web interface using browser-based login for authentication and direct HTTP requests for data access.
+No official API keys needed — this tool uses browser-based login for authentication and direct HTTP requests for data access.
 
 ## Installation
 
@@ -28,6 +28,8 @@ jlcpcb-cli login
 
 Session cookies are persisted to `~/.jlcpcb-cli/browser-cookies.json`. Re-run `login` when the session expires.
 
+Playwright is only needed for `login`: `pip install jlcpcb-cli[login]`
+
 ## Usage
 
 ### List order batches
@@ -49,8 +51,24 @@ jlcpcb-cli --json orders get W2025122821367552
 
 Returns detailed information for all orders in a batch, including:
 - **PCB orders**: Layer count, dimensions, surface finish, copper weight, impedance control, cost breakdown
-- **SMT orders**: BOM/coordinate files, assembly costs
-- **3DP orders**: Material, color, dimensions, technology
+- **SMT orders**: BOM/coordinate files, assembly costs, patch side
+- **3DP orders**: Status, dates, costs
+
+### Parts inventory
+
+```bash
+jlcpcb-cli --json parts inventory
+jlcpcb-cli --json parts inventory --search "resistor" --limit 10
+```
+
+Lists components stored at JLCPCB (your personal inventory).
+
+### Parts order history
+
+```bash
+jlcpcb-cli --json parts list-orders
+jlcpcb-cli --json parts get-order POB0202603031859897
+```
 
 ## Order Structure
 
@@ -58,9 +76,9 @@ JLCPCB groups orders into **batches** (prefixed `W`). A batch may contain multip
 
 | Type | Description |
 |------|-------------|
-| `order_pcb` | PCB manufacturing |
-| `order_smt` | SMT assembly |
-| `order_tdp` | 3D printing (JLC3DP) |
+| `pcb` | PCB manufacturing |
+| `smt` | SMT assembly |
+| `3dp` | 3D printing (JLC3DP) |
 
 ## Requirements
 

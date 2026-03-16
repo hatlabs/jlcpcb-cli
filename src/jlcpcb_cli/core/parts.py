@@ -1,47 +1,54 @@
-"""JLCPCB Components API — public and private library."""
+"""Personal parts inventory at JLCPCB via web API."""
 
-from jlcpcb_cli.core.client import JlcpcbClient
+import time
 
-COMPONENT_INFO_PATH = "/overseas/openapi/component/getComponentInfos"
+from jlcpcb_cli.core.web_client import WebClient
+
+_INVENTORY_PATH = (
+    "/overseas-smt-component-order-platform/v1"
+    "/overseasSmtComponentOrder/myLibrary/getCustomerComponentStock"
+)
 
 
-def list_components(
-    client: JlcpcbClient,
+def list_inventory(
+    client: WebClient,
     *,
+    search: str = "",
     page: int = 1,
     limit: int = 30,
 ) -> dict:
-    """List components from the JLCPCB component library."""
-    result = client.api_post(
-        COMPONENT_INFO_PATH, {"pageNum": page, "pageSize": limit}
+    """List components stored at JLCPCB."""
+    result = client.api_get(
+        _INVENTORY_PATH,
+        {
+            "pageNum": str(page),
+            "pageSize": str(limit),
+            "keyWord": search,
+            "_t": str(int(time.time() * 1000)),
+        },
     )
 
-    data = result["data"]
-    items = data.get("componentInfos") or []
+    data = result.get("data") or {}
+    items = data.get("list") or []
 
     return {
         "pagination": {
             "page": page,
             "pageSize": limit,
-            "total": len(items),  # API doesn't return total count
+            "total": data.get("total", 0),
         },
         "components": [_extract_component(c) for c in items],
     }
 
 
 def _extract_component(comp: dict) -> dict:
-    """Extract component info from API response."""
     return {
-        "lcscPart": comp.get("lcscPart"),
-        "mfrPart": comp.get("mfrPart"),
-        "manufacturer": comp.get("manufacturer"),
-        "category": comp.get("firstCategory"),
-        "subcategory": comp.get("secondCategory"),
-        "package": comp.get("package"),
-        "solderJoints": comp.get("solderJoint"),
-        "libraryType": comp.get("libraryType"),
+        "lcscPart": comp.get("componentCode"),
+        "mfrPart": comp.get("componentModel"),
+        "manufacturer": comp.get("componentBrand"),
+        "category": comp.get("componentType"),
+        "package": comp.get("componentSpecification"),
         "description": comp.get("description"),
-        "stock": comp.get("stock"),
-        "price": comp.get("price"),
-        "datasheet": comp.get("datasheet"),
+        "stock": comp.get("privateStockCount"),
+        "rohs": bool(comp.get("rohsFlag")),
     }

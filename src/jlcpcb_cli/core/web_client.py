@@ -1,7 +1,7 @@
 """HTTP client for JLCPCB web API endpoints.
 
-Replaces the headless browser client. Uses cookies saved during login
-to authenticate direct HTTP requests.
+Uses cookies saved during interactive browser login to authenticate
+direct HTTP requests to jlcpcb.com.
 """
 
 import json
@@ -10,7 +10,9 @@ import urllib.parse
 import urllib.request
 import uuid
 
-from jlcpcb_cli.core.client import JlcpcbAPIError
+
+class JlcpcbAPIError(Exception):
+    """Error from JLCPCB API."""
 
 
 class _StaleSecretKeyError(JlcpcbAPIError):
@@ -46,9 +48,9 @@ class WebClient:
 
     def _refresh_secret_key(self) -> str:
         key_id = uuid.uuid4().hex
-        body = self._http_post(
+        body = self._http_request(
             f"{BASE_URL}/api/overseas-core-platform/secret/update",
-            {"keyId": key_id},
+            data=json.dumps({"keyId": key_id}).encode(),
             headers={"x-xsrf-token": self._xsrf_token()},
         )
         secret = (body.get("data") or {}).get("keyId")
@@ -59,26 +61,23 @@ class WebClient:
         self._secret_key = secret
         return secret
 
-    def _http_post(
+    def _http_request(
         self,
         url: str,
-        data: dict,
         *,
+        data: bytes | None = None,
         headers: dict[str, str] | None = None,
     ) -> dict:
         hdrs = {
             "Cookie": self._cookie_header(),
-            "Content-Type": "application/json",
             "User-Agent": _USER_AGENT,
         }
+        if data is not None:
+            hdrs["Content-Type"] = "application/json"
         if headers:
             hdrs.update(headers)
 
-        req = urllib.request.Request(
-            url,
-            data=json.dumps(data).encode(),
-            headers=hdrs,
-        )
+        req = urllib.request.Request(url, data=data, headers=hdrs)
 
         try:
             with urllib.request.urlopen(req, timeout=30) as resp:
@@ -95,15 +94,27 @@ class WebClient:
         except urllib.error.URLError as e:
             raise JlcpcbAPIError(f"Connection error: {e.reason}") from e
 
-    def api_post(self, path: str, data: dict) -> dict:
-        """Make an authenticated POST to a JLCPCB web API endpoint.
+    def _auth_headers(self) -> dict[str, str]:
+        return {
+            "x-xsrf-token": self._xsrf_token(),
+            "secretkey": self._secret_key,
+        }
 
-        Handles XSRF token and secret key automatically.
-        On auth failure, retries once with a fresh secret key.
-        """
+    def _ensure_secret_key(self) -> None:
         if self._secret_key is None:
             self._refresh_secret_key()
 
+    def _check_stale_key(self, result: dict) -> None:
+        # JLCPCB returns success=false with code 401/403 when the secret
+        # key has expired (30-minute TTL).
+        if not result.get("success") and result.get("code") in (401, 403):
+            raise _StaleSecretKeyError(
+                f"Secret key rejected (code={result.get('code')})"
+            )
+
+    def api_post(self, path: str, data: dict) -> dict:
+        """Make an authenticated POST to a JLCPCB web API endpoint."""
+        self._ensure_secret_key()
         try:
             return self._do_api_post(path, data)
         except _StaleSecretKeyError:
@@ -111,20 +122,29 @@ class WebClient:
             return self._do_api_post(path, data)
 
     def _do_api_post(self, path: str, data: dict) -> dict:
-        result = self._http_post(
+        result = self._http_request(
             f"{BASE_URL}/api{path}",
-            data,
-            headers={
-                "x-xsrf-token": self._xsrf_token(),
-                "secretkey": self._secret_key,
-            },
+            data=json.dumps(data).encode(),
+            headers=self._auth_headers(),
         )
-        # JLCPCB returns success=false with code 401/403 when the secret
-        # key has expired (30-minute TTL).
-        if not result.get("success") and result.get("code") in (401, 403):
-            raise _StaleSecretKeyError(
-                f"Secret key rejected (code={result.get('code')})"
-            )
+        self._check_stale_key(result)
+        return result
+
+    def api_get(self, path: str, params: dict[str, str] | None = None) -> dict:
+        """Make an authenticated GET to a JLCPCB web API endpoint."""
+        self._ensure_secret_key()
+        try:
+            return self._do_api_get(path, params)
+        except _StaleSecretKeyError:
+            self._refresh_secret_key()
+            return self._do_api_get(path, params)
+
+    def _do_api_get(self, path: str, params: dict[str, str] | None = None) -> dict:
+        url = f"{BASE_URL}/api{path}"
+        if params:
+            url += "?" + urllib.parse.urlencode(params)
+        result = self._http_request(url, headers=self._auth_headers())
+        self._check_stale_key(result)
         return result
 
 
