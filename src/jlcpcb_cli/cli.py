@@ -8,7 +8,7 @@ import click
 from jlcpcb_cli.core.client import JlcpcbClient, JlcpcbAPIError
 from jlcpcb_cli.core.orders import get_order
 from jlcpcb_cli.core.parts import list_components
-from jlcpcb_cli.core.browser import get_browser_client
+from jlcpcb_cli.core.web_client import get_web_client
 from jlcpcb_cli.core.web_orders import list_orders
 from jlcpcb_cli.core.web_parts import list_parts_orders, get_parts_order
 from jlcpcb_cli.core import auth
@@ -52,10 +52,10 @@ def orders():
 @click.option("--limit", default=15, type=int, help="Results per page.")
 @click.option("--page", default=1, type=int, help="Page number.")
 def orders_list(status, search, limit, page):
-    """List order batches (requires browser login)."""
+    """List order batches (requires login)."""
     try:
         result = list_orders(
-            get_browser_client(), status=status, search=search, limit=limit, page=page
+            get_web_client(), status=status, search=search, limit=limit, page=page
         )
         _output(result)
     except Exception as e:
@@ -105,10 +105,10 @@ def parts_list(limit, page):
 @click.option("--limit", default=25, type=int, help="Results per page.")
 @click.option("--page", default=1, type=int, help="Page number.")
 def parts_list_orders(status, search, limit, page):
-    """List parts purchase order batches (requires browser login)."""
+    """List parts purchase order batches (requires login)."""
     try:
         result = list_parts_orders(
-            get_browser_client(), status=status, search=search, limit=limit, page=page
+            get_web_client(), status=status, search=search, limit=limit, page=page
         )
         _output(result)
     except Exception as e:
@@ -119,9 +119,9 @@ def parts_list_orders(status, search, limit, page):
 @parts.command("get-order")
 @click.argument("batch_no")
 def parts_get_order(batch_no):
-    """Get full details for a parts order batch (requires browser login)."""
+    """Get full details for a parts order batch (requires login)."""
     try:
-        result = get_parts_order(get_browser_client(), batch_no)
+        result = get_parts_order(get_web_client(), batch_no)
         _output(result)
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
