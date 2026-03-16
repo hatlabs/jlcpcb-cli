@@ -68,36 +68,46 @@ def _map_status(status: str | None) -> str:
     if status is None or status == "all":
         return ""
     return {
-        "paid": "paySuccess",
+        "in_progress": "paySuccess",
         "unpaid": "waitPay",
         "cancelled": "cancelled",
         "completed": "completed",
     }.get(status, "")
 
 
+def _all_sub_orders(batch: dict) -> list[dict]:
+    """Combine all sub-order lists from a batch.
+
+    Batches contain separate lists by fulfillment type:
+    stockList (in-stock), buyList (purchasing), overseasShopList, idleOrderList.
+    """
+    orders = []
+    for key in ("stockList", "buyList", "overseasShopList", "idleOrderList"):
+        orders.extend(batch.get(key) or [])
+    return orders
+
+
 def _extract_parts_batch(batch: dict) -> dict:
-    stock_list = batch.get("stockList") or []
-    total_paid = sum(s.get("paidMoney") or 0 for s in stock_list)
+    sub_orders = _all_sub_orders(batch)
+    total_paid = sum(s.get("paidMoney") or 0 for s in sub_orders)
     total_items = sum(
-        len(s.get("presaleGoodsRecords") or []) for s in stock_list
+        len(s.get("presaleGoodsRecords") or []) for s in sub_orders
     )
 
     return {
         "orderBatchNo": batch.get("orderBatchNo"),
         "date": _ms_to_iso(batch.get("createTime")),
-        "partsOrderCount": len(stock_list),
+        "partsOrderCount": len(sub_orders),
         "componentCount": total_items,
         "totalPaid": round(total_paid, 2),
     }
 
 
 def _extract_parts_batch_detail(batch: dict) -> dict:
-    stock_list = batch.get("stockList") or []
-
     return {
         "orderBatchNo": batch.get("orderBatchNo"),
         "date": _ms_to_iso(batch.get("createTime")),
-        "partsOrders": [_extract_parts_order(s) for s in stock_list],
+        "partsOrders": [_extract_parts_order(s) for s in _all_sub_orders(batch)],
     }
 
 
@@ -119,7 +129,7 @@ def _extract_parts_order(stock: dict) -> dict:
 
 
 def _extract_component(goods: dict) -> dict:
-    return {
+    result = {
         "componentCode": goods.get("componentCode"),
         "name": goods.get("componentName"),
         "model": goods.get("componentModel"),
@@ -133,12 +143,18 @@ def _extract_component(goods: dict) -> dict:
         "inStorageNumber": goods.get("inStorageNumber"),
         "status": _goods_status_label(goods.get("goodsStatus")),
     }
+    if goods.get("deliveryDate"):
+        result["estimatedDelivery"] = _ms_to_iso(goods["deliveryDate"])
+    return result
 
 
 def _status_label(code: int | None) -> str:
-    return {10: "unpaid", 20: "paid", 30: "completed", 40: "cancelled"}.get(
-        code, f"unknown({code})"
-    )
+    return {
+        10: "unpaid",
+        20: "in_progress",
+        30: "completed",
+        40: "cancelled",
+    }.get(code, f"unknown({code})")
 
 
 def _goods_status_label(code: int | None) -> str:
