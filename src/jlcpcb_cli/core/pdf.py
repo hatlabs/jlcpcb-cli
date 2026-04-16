@@ -1,7 +1,16 @@
 """PDF generation for JLCPCB billing documents using WeasyPrint."""
 
 import html as html_mod
+import os
+import sys
 from pathlib import Path
+
+# WeasyPrint uses cffi/dlopen to load pango/gobject/cairo.  On macOS with
+# Homebrew these live under /opt/homebrew/lib but dlopen won't find them
+# without a hint.  Setting DYLD_FALLBACK_LIBRARY_PATH before the first
+# dlopen (i.e. before importing weasyprint) makes it work transparently.
+if sys.platform == "darwin":
+    os.environ.setdefault("DYLD_FALLBACK_LIBRARY_PATH", "/opt/homebrew/lib")
 
 from weasyprint import HTML
 
