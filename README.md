@@ -70,6 +70,22 @@ jlcpcb-cli --json parts list-orders
 jlcpcb-cli --json parts get-order POB0202603031859897
 ```
 
+### Billing history
+
+```bash
+jlcpcb-cli billing list
+jlcpcb-cli billing list --search W2026031901374275
+jlcpcb-cli billing get W2026031901374275
+jlcpcb-cli billing invoice W2026031901374275
+jlcpcb-cli billing invoice W2026031901374275 --download .
+jlcpcb-cli billing invoice POB0202603031859897
+```
+
+- `billing list` — Paginated payment history with Pay/Supplement/Refund transactions per batch
+- `billing get` — Full receipt/credit note detail for each transaction in a batch
+- `billing invoice` — Commercial invoice data (dispatches to correct endpoint by batch prefix)
+- `--download DIR` — Save PDF + JSON files to the given directory (requires `pip install jlcpcb-cli[pdf]`)
+
 ## Order Structure
 
 JLCPCB groups orders into **batches** (prefixed `W`). A batch may contain multiple orders (e.g., PCB + SMT assembly for the same board). Each order has a type:
@@ -84,3 +100,5 @@ JLCPCB groups orders into **batches** (prefixed `W`). A batch may contain multip
 
 - Python 3.10+
 - Playwright (only for `jlcpcb-cli login`): `pip install jlcpcb-cli[login]`
+- WeasyPrint (only for `--download` PDF generation): `pip install jlcpcb-cli[pdf]`
+  - Requires system libraries: `brew install pango` (macOS) or `apt install libpango-1.0-0` (Debian/Ubuntu)
