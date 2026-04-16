@@ -6,6 +6,7 @@ import sys
 import click
 
 from jlcpcb_cli.core.web_client import get_web_client
+from jlcpcb_cli.core.billing import list_billing, get_billing_detail, get_billing_invoice
 from jlcpcb_cli.core.orders import get_order
 from jlcpcb_cli.core.parts import list_inventory
 from jlcpcb_cli.core.web_orders import list_orders
@@ -120,6 +121,58 @@ def parts_get_order(batch_no):
     """Get full details for a parts order batch."""
     try:
         result = get_parts_order(get_web_client(), batch_no)
+        _output(result)
+    except Exception as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
+
+@cli.group()
+def billing():
+    """Billing: payment history, receipts, and invoices."""
+    pass
+
+
+@billing.command("list")
+@click.option("--search", default=None, help="Filter by batch number.")
+@click.option("--limit", default=10, type=int, help="Results per page.")
+@click.option("--page", default=1, type=int, help="Page number.")
+def billing_list(search, limit, page):
+    """List billing batch orders with payment summaries."""
+    try:
+        result = list_billing(
+            get_web_client(), search=search, limit=limit, page=page
+        )
+        _output(result)
+    except Exception as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
+
+@billing.command("get")
+@click.argument("batch_num")
+@click.option("--download", "download_dir", default=None, help="Save each receipt/credit note JSON to directory.")
+def billing_get(batch_num, download_dir):
+    """Get full billing detail with transaction receipts for a batch."""
+    try:
+        result = get_billing_detail(
+            get_web_client(), batch_num, download_dir=download_dir
+        )
+        _output(result)
+    except Exception as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
+
+@billing.command("invoice")
+@click.argument("batch_num")
+@click.option("--download", "download_dir", default=None, help="Save invoice JSON to directory.")
+def billing_invoice(batch_num, download_dir):
+    """Get invoice data for a billing batch."""
+    try:
+        result = get_billing_invoice(
+            get_web_client(), batch_num, download_dir=download_dir
+        )
         _output(result)
     except Exception as e:
         click.echo(f"Error: {e}", err=True)

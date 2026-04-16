@@ -18,7 +18,8 @@ jlcpcb-cli = "jlcpcb_cli.cli:main"
 
 [project.optional-dependencies]
 login = ["playwright>=1.40.0"]
-dev = ["pytest>=7.0", "playwright>=1.40.0"]
+pdf = ["weasyprint>=60.0"]
+dev = ["pytest>=7.0", "playwright>=1.40.0", "weasyprint>=60.0"]
 
 [tool.setuptools.dynamic]
 version = {attr = "jlcpcb_cli.__version__"}
