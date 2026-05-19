@@ -1,4 +1,9 @@
-"""Authentication — browser login for web API endpoints."""
+"""Authentication — browser login for web API endpoints.
+
+Playwright is imported lazily inside ``login`` and ``_wait_for_login`` so
+non-login CLI subcommands (e.g. ``--help``, ``orders list``) don't pay the
+import cost.
+"""
 
 import json
 import time
@@ -8,6 +13,8 @@ COOKIE_DIR = Path.home() / ".jlcpcb-cli"
 CHROME_PROFILE_DIR = COOKIE_DIR / "chrome-profile"
 COOKIES_FILE = COOKIE_DIR / "browser-cookies.json"
 STORAGE_STATE_FILE = COOKIE_DIR / "storage-state.json"
+
+ORDERS_URL = "https://jlcpcb.com/user-center/orders"
 
 
 def _ensure_dirs() -> None:
@@ -30,6 +37,18 @@ def load_browser_cookies() -> list[dict]:
         return []
 
 
+def _is_orders_url(url: str) -> bool:
+    """Return True if ``url`` is on the authenticated orders page.
+
+    Strict scheme+host+path prefix match. Login pages on
+    ``passport.jlcpcb.com`` that carry a ``redirect_url`` query parameter
+    pointing back to ``/user-center/orders`` must NOT satisfy this check —
+    that's the false-positive that caused login to declare success before
+    the user had actually authenticated.
+    """
+    return url.startswith(ORDERS_URL)
+
+
 def login() -> None:
     """Launch browser for interactive JLCPCB login.
 
@@ -49,7 +68,7 @@ def login() -> None:
 
         try:
             page = context.pages[0] if context.pages else context.new_page()
-            page.goto("https://jlcpcb.com/user-center/orders/")
+            page.goto(f"{ORDERS_URL}/")
 
             print("Please log in via the browser window.")
             print("Waiting for order page to load (up to 5 minutes)...")
@@ -79,13 +98,29 @@ def login() -> None:
 
 
 def _wait_for_login(page) -> None:
-    """Wait for the user to complete login and reach the orders page."""
+    """Wait for the user to complete login and reach the orders page.
+
+    JLCPCB performs a client-side JS redirect to passport.jlcpcb.com for
+    unauthenticated requests, so the URL right after ``page.goto`` still
+    matches the original target. Wait for networkidle first so any pending
+    redirect settles, then poll for the orders URL.
+
+    Raises:
+        TimeoutError: if the orders page is not reached within 5 minutes.
+    """
+    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
+    try:
+        page.wait_for_load_state("networkidle", timeout=15000)
+    except PlaywrightTimeoutError:
+        pass  # Page may never reach idle; fall through to polling.
+
     timeout = 300
     start = time.time()
     while time.time() - start < timeout:
-        url = page.url
-        if "jlcpcb.com/user-center/orders" in url:
-            page.wait_for_load_state("networkidle")
+        if _is_orders_url(page.url):
             return
         time.sleep(1)
-    raise TimeoutError("Login timed out after 5 minutes.")
+    raise TimeoutError(
+        f"Login timed out after 5 minutes (last URL: {page.url})"
+    )
