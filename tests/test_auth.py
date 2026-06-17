@@ -7,70 +7,53 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from jlcpcb_cli.core import auth
 from jlcpcb_cli.core.auth import (
-    _is_orders_url,
+    _has_auth_cookie,
     _wait_for_login,
     load_browser_cookies,
     save_browser_cookies,
 )
 
 
-# ---------------------------------------------------------------------------
-# _is_orders_url — the predicate that gates "login successful"
-# ---------------------------------------------------------------------------
-
-
-def test_is_orders_url_matches_canonical_orders_paths():
-    assert _is_orders_url("https://jlcpcb.com/user-center/orders/")
-    assert _is_orders_url("https://jlcpcb.com/user-center/orders")
-    assert _is_orders_url("https://jlcpcb.com/user-center/orders/?_t=1779174147403")
-    assert _is_orders_url("https://jlcpcb.com/user-center/orders/details/12345")
-
-
-def test_is_orders_url_rejects_substring_traps_on_other_hosts():
-    """The previous substring check (``"jlcpcb.com/user-center/orders" in url``)
-    would have matched URLs that merely contain the orders path inside a query
-    parameter on a non-jlcpcb host. The strict prefix check rejects them.
-    """
-    trap_urls = [
-        # Non-jlcpcb host with the orders path in a query string.
-        "https://evil.example.com/?next=jlcpcb.com/user-center/orders",
-        # passport subdomain with the orders path unencoded in a hash fragment.
-        "https://passport.jlcpcb.com/#/login?next=jlcpcb.com/user-center/orders",
-        # http (not https) — strict prefix rejects scheme downgrade.
-        "http://jlcpcb.com/user-center/orders/",
-    ]
-    for url in trap_urls:
-        assert "jlcpcb.com/user-center/orders" in url, f"trap baseline: {url}"
-        assert not _is_orders_url(url), f"strict check should reject: {url}"
-
-
-def test_is_orders_url_rejects_other_hosts_and_paths():
-    assert not _is_orders_url("https://passport.jlcpcb.com/")
-    assert not _is_orders_url("https://jlcpcb.com/")
-    assert not _is_orders_url("https://jlcpcb.com/api/auth/login?_t=123")
-    assert not _is_orders_url("about:blank")
-    assert not _is_orders_url("")
+def _cookie(name, value="x"):
+    return {"name": name, "value": value, "domain": "jlcpcb.com"}
 
 
 # ---------------------------------------------------------------------------
-# _wait_for_login — uses a fake page so we don't launch playwright
+# _has_auth_cookie — the predicate that gates "login successful"
+# ---------------------------------------------------------------------------
+
+
+def test_has_auth_cookie_true_when_session_cookie_present():
+    cookies = [_cookie("XSRF-TOKEN"), _cookie("jlc_session_customer_code", "tok")]
+    assert _has_auth_cookie(cookies)
+
+
+def test_has_auth_cookie_false_when_absent():
+    # XSRF-TOKEN is set for anonymous visitors too, so it must not count.
+    assert not _has_auth_cookie([_cookie("XSRF-TOKEN"), _cookie("_ga")])
+    assert not _has_auth_cookie([])
+
+
+def test_has_auth_cookie_false_when_value_empty():
+    assert not _has_auth_cookie([_cookie("jlc_session_customer_code", "")])
+
+
+# ---------------------------------------------------------------------------
+# _wait_for_login — fakes context+page so we don't launch playwright
 # ---------------------------------------------------------------------------
 
 
 class _FakePage:
     """Minimal stand-in for a playwright Page in `_wait_for_login`."""
 
-    def __init__(self, urls, networkidle_raises=None):
-        self._urls = list(urls)
+    def __init__(self, url="https://passport.jlcpcb.com/#/login", networkidle_raises=None):
+        self._url = url
         self._networkidle_raises = networkidle_raises
-        self._url_index = 0
         self.load_state_calls = 0
 
     @property
     def url(self) -> str:
-        idx = min(self._url_index, len(self._urls) - 1)
-        self._url_index += 1
-        return self._urls[idx]
+        return self._url
 
     def wait_for_load_state(self, state: str, timeout: int = 0) -> None:
         self.load_state_calls += 1
@@ -78,42 +61,48 @@ class _FakePage:
             raise self._networkidle_raises
 
 
-def test_wait_for_login_returns_when_url_matches_immediately(monkeypatch):
+class _FakeContext:
+    """Returns a successive cookie list on each `cookies()` call."""
+
+    def __init__(self, cookie_snapshots):
+        self._snapshots = list(cookie_snapshots)
+        self._index = 0
+
+    def cookies(self):
+        snap = self._snapshots[min(self._index, len(self._snapshots) - 1)]
+        self._index += 1
+        return snap
+
+
+_AUTH = [_cookie("jlc_session_customer_code", "tok")]
+
+
+def test_wait_for_login_returns_when_cookie_present_immediately(monkeypatch):
     monkeypatch.setattr(auth.time, "sleep", lambda _s: None)
-    page = _FakePage(["https://jlcpcb.com/user-center/orders/"])
-    _wait_for_login(page)
+    page = _FakePage()
+    _wait_for_login(_FakeContext([_AUTH]), page)
     assert page.load_state_calls == 1  # networkidle wait was attempted
 
 
 def test_wait_for_login_swallows_playwright_timeout_and_polls(monkeypatch):
     monkeypatch.setattr(auth.time, "sleep", lambda _s: None)
     page = _FakePage(
-        ["https://jlcpcb.com/user-center/orders/"],
         networkidle_raises=PlaywrightTimeoutError("Timeout 15000ms exceeded"),
     )
-    _wait_for_login(page)  # swallowed; polling then matches
+    _wait_for_login(_FakeContext([_AUTH]), page)  # swallowed; cookie then matches
 
 
-def test_wait_for_login_polls_until_redirect_returns_to_orders(monkeypatch):
+def test_wait_for_login_polls_until_cookie_appears(monkeypatch):
     monkeypatch.setattr(auth.time, "sleep", lambda _s: None)
-    urls = [
-        "https://passport.jlcpcb.com/#/login?response_type=code",
-        "https://passport.jlcpcb.com/#/login?response_type=code",
-        "https://jlcpcb.com/api/auth/login?_t=123",
-        "https://jlcpcb.com/user-center/orders/?_t=456",
-    ]
-    page = _FakePage(urls)
-    _wait_for_login(page)
+    ctx = _FakeContext([[], [_cookie("XSRF-TOKEN")], _AUTH])
+    _wait_for_login(ctx, _FakePage())
 
 
 def test_wait_for_login_does_not_swallow_unrelated_exceptions(monkeypatch):
     monkeypatch.setattr(auth.time, "sleep", lambda _s: None)
-    page = _FakePage(
-        ["https://jlcpcb.com/user-center/orders/"],
-        networkidle_raises=RuntimeError("not a playwright timeout"),
-    )
+    page = _FakePage(networkidle_raises=RuntimeError("not a playwright timeout"))
     with pytest.raises(RuntimeError, match="not a playwright timeout"):
-        _wait_for_login(page)
+        _wait_for_login(_FakeContext([_AUTH]), page)
 
 
 def test_wait_for_login_raises_timeout_with_final_url(monkeypatch):
@@ -127,10 +116,10 @@ def test_wait_for_login_raises_timeout_with_final_url(monkeypatch):
     monkeypatch.setattr(auth.time, "sleep", lambda _s: None)
 
     stuck_url = "https://passport.jlcpcb.com/#/login?response_type=code"
-    page = _FakePage([stuck_url])
+    page = _FakePage(url=stuck_url)
 
     with pytest.raises(TimeoutError) as exc:
-        _wait_for_login(page)
+        _wait_for_login(_FakeContext([[]]), page)
 
     # The error message must include the final page.url for diagnosability.
     assert stuck_url in str(exc.value)
