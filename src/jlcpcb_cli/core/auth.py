@@ -68,6 +68,16 @@ def login() -> None:
 
         try:
             page = context.pages[0] if context.pages else context.new_page()
+
+            # The persistent profile retains jlc_session_customer_code across
+            # runs (login even rewrites it to a far-future expiry). Left in
+            # place it would satisfy the cookie check below before the user
+            # authenticates — a false "login successful" against a session the
+            # server may have long since invalidated. Clear it so only a real
+            # login this run can set it again; a still-valid session simply
+            # re-issues it on the navigation below.
+            context.clear_cookies(name=AUTH_COOKIE)
+
             page.goto(f"{ORDERS_URL}/")
 
             print("Please log in via the browser window.")

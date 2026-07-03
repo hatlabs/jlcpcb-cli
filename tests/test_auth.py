@@ -127,6 +127,117 @@ def test_wait_for_login_raises_timeout_with_final_url(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# login — a stale auth cookie in the persistent profile must not shortcut login
+# ---------------------------------------------------------------------------
+
+
+class _FakeJar:
+    """Cookie store shared by the fake context; supports name-filtered clear."""
+
+    def __init__(self, initial):
+        self._cookies = [dict(c) for c in initial]
+        self.clear_calls = []
+
+    def cookies(self):
+        return [dict(c) for c in self._cookies]
+
+    def clear_cookies(self, name=None):
+        self.clear_calls.append(name)
+        if name is None:
+            self._cookies = []
+        else:
+            self._cookies = [c for c in self._cookies if c.get("name") != name]
+
+    def add_cookies(self, cookies):
+        self._cookies = [dict(c) for c in cookies]
+
+
+class _FakeLoginPage:
+    def __init__(self):
+        self.url = "https://jlcpcb.com/user-center/orders/"
+
+    def goto(self, url):
+        pass
+
+    def wait_for_timeout(self, ms):
+        pass
+
+
+class _FakeLoginContext:
+    def __init__(self, jar, page):
+        self._jar = jar
+        self.pages = [page]
+        self.closed = False
+
+    def cookies(self):
+        return self._jar.cookies()
+
+    def clear_cookies(self, name=None):
+        self._jar.clear_cookies(name=name)
+
+    def add_cookies(self, cookies):
+        self._jar.add_cookies(cookies)
+
+    def close(self):
+        self.closed = True
+
+
+class _FakeSyncPlaywright:
+    """Stands in for the sync_playwright() context manager."""
+
+    def __init__(self, context):
+        self._context = context
+
+    def __enter__(self):
+        chromium = type(
+            "_Chromium",
+            (),
+            {"launch_persistent_context": lambda _self, **kw: self._context},
+        )()
+        return type("_PW", (), {"chromium": chromium})()
+
+    def __exit__(self, *exc):
+        return False
+
+
+def test_login_clears_stale_auth_cookie_before_detecting_login(
+    monkeypatch, isolated_cookie_dir
+):
+    # The persistent profile starts with a stale auth cookie (server-side dead).
+    jar = _FakeJar(
+        [_cookie("jlc_session_customer_code", "STALE"), _cookie("XSRF-TOKEN")]
+    )
+    context = _FakeLoginContext(jar, _FakeLoginPage())
+    monkeypatch.setattr(
+        "playwright.sync_api.sync_playwright",
+        lambda: _FakeSyncPlaywright(context),
+    )
+
+    seen = {}
+
+    def fake_wait(ctx, page):
+        # login() must have cleared the stale cookie before we get here, so a
+        # pre-existing profile cookie can never be mistaken for a fresh login.
+        seen["auth_present"] = _has_auth_cookie(ctx.cookies())
+        # Simulate the user actually completing login in the browser.
+        ctx.add_cookies(
+            [_cookie("jlc_session_customer_code", "FRESH"), _cookie("XSRF-TOKEN")]
+        )
+
+    monkeypatch.setattr(auth, "_wait_for_login", fake_wait)
+
+    auth.login()
+
+    assert seen["auth_present"] is False
+    saved = load_browser_cookies()
+    assert any(
+        c["name"] == "jlc_session_customer_code" and c["value"] == "FRESH"
+        for c in saved
+    )
+    assert context.closed
+
+
+# ---------------------------------------------------------------------------
 # save_browser_cookies / load_browser_cookies round-trip
 # ---------------------------------------------------------------------------
 
