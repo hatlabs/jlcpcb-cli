@@ -54,6 +54,32 @@ Returns detailed information for all orders in a batch, including:
 - **SMT orders**: BOM/coordinate files, assembly costs, patch side
 - **3DP orders**: Status, dates, costs
 
+### Assembly BOM
+
+```bash
+jlcpcb-cli --json orders bom W2026082015506207
+```
+
+Returns `{"batchNum", "smtOrders": [...]}`, one entry per SMT order in the batch. Each entry carries `orderCode`, `quantity` (boards assembled), `assemblySide`, `suppliedByJlcpcbTotal`, and `components`.
+
+Each component row gives the LCSC part number, manufacturer part, designators, `placements` (placements over the whole order, not per board), `unitsUsed` (including the `lossUnits` allowance), and the unit price JLCPCB charged.
+
+The units are split across `unitsFromPreorder` (your Parts Manager stock), `unitsFromJlcpcb` (sourced by JLCPCB for this order), `unitsFree`, and `unitsUnattributed` for whatever the other three do not account for. On a real 172-row order, five rows carried unattributed units. `unitPrice` and `totalMoney` cover the `unitsFromJlcpcb` units only, so a row supplied entirely from pre-ordered stock costs 0 here. `suppliedByJlcpcbTotal` is the sum of `totalMoney` over the rows.
+
+The endpoint also reports a `totalPrice` per SMT order. It is not exposed: on one order it equalled `suppliedByJlcpcbTotal` and on another it exceeded it by 277 EUR, and nothing in the response accounts for the difference.
+
+### Inventory usage
+
+```bash
+jlcpcb-cli --json orders usage W2026082015506207
+```
+
+Shows the Parts Manager stock each SMT order consumed: per component, the quantity drawn, the settled unit price, and the `POB` pre-order batch and presale order it came from. `totalFromInventory` is the component cost that sits in those pre-order batches rather than in this order's invoice.
+
+All money in both commands is in USD, reported as `currency` on each SMT order. Neither endpoint returns a currency field; the web UI labels these same figures "Unit Price(USD)" on an account whose every other page renders EUR. Multiply by the batch's `exchangeRate` from `billing invoice` to get the invoiced amount in your settlement currency: on W2026082015506207 a `totalFromInventory` of 4654.66 times a rate of 0.8555 gives 3982.06, the `presaleMoney` on that invoice, to the cent.
+
+`consigned` lists stock you shipped to JLCPCB yourself. No observed order has returned a row, so those rows pass through with JLCPCB's own field names and are not counted in `totalFromInventory`.
+
 ### Parts inventory
 
 ```bash
