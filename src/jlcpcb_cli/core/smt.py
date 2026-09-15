@@ -7,6 +7,11 @@ detail carries as ``smtOrderAccessId``.
 from jlcpcb_cli.core.orders import ORDER_DETAIL_PATH, TYPE_SMT
 from jlcpcb_cli.core.web_client import JlcpcbAPIError, WebClient
 
+# Neither endpoint returns a currency. The web UI labels these same figures
+# "Unit Price(USD)" on an account whose every other page renders EUR, so the
+# currency is a constant of the API rather than a property of the account.
+CURRENCY = "USD"
+
 _BOM_PATH = "/overseas-pcb-order/v1/smtOrder/getSmtOrderDetail"
 _USAGE_PATH = "/overseas-pcb-order/v1/smtOrder/querySmtComponent"
 
@@ -28,6 +33,7 @@ def get_bom(client: WebClient, batch_num: str) -> dict:
                 "orderCode": smt["orderCode"],
                 "quantity": data.get("patchNum") or smt["quantity"],
                 "assemblySide": data.get("patchLocation"),
+                "currency": CURRENCY,
                 "suppliedByJlcpcbTotal": round(
                     sum(c["totalMoney"] or 0 for c in components), 2
                 ),
@@ -50,6 +56,7 @@ def get_usage(client: WebClient, batch_num: str) -> dict:
         orders.append(
             {
                 "orderCode": smt["orderCode"],
+                "currency": CURRENCY,
                 "totalFromInventory": round(
                     sum(r["totalPrice"] or 0 for r in rows), 2
                 ),

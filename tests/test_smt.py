@@ -240,6 +240,7 @@ def test_get_bom_totals_and_rows():
     assert smt["orderCode"] == "SMT026082060917"
     assert smt["quantity"] == 75
     assert smt["assemblySide"] == "TB"
+    assert smt["currency"] == "USD"
     assert smt["suppliedByJlcpcbTotal"] == 3.41
     assert [c["componentCode"] for c in smt["components"]] == ["C4184", "C2128"]
     assert (_BOM_PATH, {"smtOrderNum": "91ca537b"}) in client.calls
@@ -332,6 +333,7 @@ def test_get_usage_totals_and_rows():
     smt = get_usage(client, "W2026082015506207")["smtOrders"][0]
 
     assert smt["orderCode"] == "SMT026082060917"
+    assert smt["currency"] == "USD"
     assert smt["totalFromInventory"] == 7.1
     assert [c["componentCode"] for c in smt["fromInventory"]] == ["C4260", "C1"]
     assert smt["consigned"] == []
