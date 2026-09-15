@@ -60,11 +60,13 @@ Returns detailed information for all orders in a batch, including:
 jlcpcb-cli --json orders bom W2026082015506207
 ```
 
-Lists every component of each SMT order in the batch: LCSC part number, manufacturer part, designators, placements, units consumed, and the price JLCPCB charged.
+Returns `{"batchNum", "smtOrders": [...]}`, one entry per SMT order in the batch. Each entry carries `orderCode`, `quantity` (boards assembled), `assemblySide`, `suppliedByJlcpcbTotal`, and `components`.
 
-`source` says where the units came from — `preorder` (your Parts Manager stock), `jlcpcb` (sourced by JLCPCB for this order), or `mixed`. `unitPrice` and `lineTotal` cover the JLCPCB-supplied units only, so both are 0 for a `preorder` row. `unitsFromPreorder` and `unitsFromJlcpcb` give the split.
+Each component row gives the LCSC part number, manufacturer part, designators, `placements` (placements over the whole order, not per board), `unitsUsed` (including the `lossUnits` allowance), and the unit price JLCPCB charged.
 
-`placements` counts placements over the whole order, not per board. `unitsUsed` adds the loss allowance in `lossUnits`.
+The units are split across `unitsFromPreorder` (your Parts Manager stock), `unitsFromJlcpcb` (sourced by JLCPCB for this order), `unitsFree`, and `unitsUnattributed` for whatever the other three do not account for. On a real 172-row order, five rows carried unattributed units. `unitPrice` and `totalMoney` cover the `unitsFromJlcpcb` units only, so a row supplied entirely from pre-ordered stock costs 0 here. `suppliedByJlcpcbTotal` is the sum of `totalMoney` over the rows.
+
+The endpoint also reports a `totalPrice` per SMT order. It is not exposed: on one order it equalled `suppliedByJlcpcbTotal` and on another it exceeded it by 277 EUR, and nothing in the response accounts for the difference.
 
 ### Inventory usage
 
@@ -72,7 +74,9 @@ Lists every component of each SMT order in the batch: LCSC part number, manufact
 jlcpcb-cli --json orders usage W2026082015506207
 ```
 
-Shows the Parts Manager stock each SMT order consumed: per component, the quantity drawn, the settled unit price, and the `POB` pre-order batch it came from. `totalFromInventory` is the component cost that sits in those pre-order batches rather than in this order's invoice.
+Shows the Parts Manager stock each SMT order consumed: per component, the quantity drawn, the settled unit price, and the `POB` pre-order batch and presale order it came from. `totalFromInventory` is the component cost that sits in those pre-order batches rather than in this order's invoice.
+
+`consigned` lists stock you shipped to JLCPCB yourself. No observed order has returned a row, so those rows pass through with JLCPCB's own field names and are not counted in `totalFromInventory`.
 
 ### Parts inventory
 

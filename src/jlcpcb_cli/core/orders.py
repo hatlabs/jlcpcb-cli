@@ -2,19 +2,19 @@
 
 from jlcpcb_cli.core.web_client import WebClient
 
-_ORDER_DETAIL_PATH = (
+ORDER_DETAIL_PATH = (
     "/overseas-core-platform/orderCenter/selectPersonOrderDetail"
 )
 
 # orderType values in the web API
 _TYPE_PCB = 1
-_TYPE_SMT = 4
+TYPE_SMT = 4
 _TYPE_3DP = 7
 
 
 def get_order(client: WebClient, batch_num: str) -> dict:
     """Get detailed order information for a batch."""
-    result = client.api_get(_ORDER_DETAIL_PATH, {"batchNum": batch_num})
+    result = client.api_get(ORDER_DETAIL_PATH, {"batchNum": batch_num})
     data = result.get("data") or {}
     items = data.get("unionOrderDetailVOList") or []
     address = data.get("orderAddress") or {}
@@ -78,7 +78,7 @@ def _extract_order(item: dict) -> dict:
     if pcb and order_type == _TYPE_PCB:
         base["specs"] = _extract_pcb_specs(pcb)
         base["costBreakdown"] = _extract_cost_breakdown(detail.get("orderCountTolls"))
-    elif smt and order_type == _TYPE_SMT:
+    elif smt and order_type == TYPE_SMT:
         base["specs"] = _extract_smt_specs(smt)
         base["orderCode"] = smt.get("smtOrderCode") or base["orderCode"]
 
@@ -136,6 +136,6 @@ def _extract_cost_breakdown(tolls: dict | None) -> dict | None:
 def _type_label(code: int | None) -> str:
     return {
         _TYPE_PCB: "pcb",
-        _TYPE_SMT: "smt",
+        TYPE_SMT: "smt",
         _TYPE_3DP: "3dp",
     }.get(code, f"unknown({code})")
