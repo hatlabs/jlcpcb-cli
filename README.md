@@ -76,6 +76,8 @@ jlcpcb-cli --json orders usage W2026082015506207
 
 Shows the Parts Manager stock each SMT order consumed: per component, the quantity drawn, the settled unit price, and the `POB` pre-order batch and presale order it came from. `totalFromInventory` is the component cost that sits in those pre-order batches rather than in this order's invoice.
 
+All money in both commands is in USD, as the web UI labels the same BOM line values. No response from either endpoint carries a currency field. Multiply by the batch's `exchangeRate` from `billing invoice` to get the invoiced amount in your settlement currency: on W2026082015506207 a `totalFromInventory` of 4654.66 times a rate of 0.8555 gives 3982.06, the `presaleMoney` on that invoice, to the cent.
+
 `consigned` lists stock you shipped to JLCPCB yourself. No observed order has returned a row, so those rows pass through with JLCPCB's own field names and are not counted in `totalFromInventory`.
 
 ### Parts inventory
