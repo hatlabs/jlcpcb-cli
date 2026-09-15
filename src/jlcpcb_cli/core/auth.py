@@ -16,6 +16,13 @@ STORAGE_STATE_FILE = COOKIE_DIR / "storage-state.json"
 
 ORDERS_URL = "https://jlcpcb.com/user-center/orders"
 
+# JLCPCB sets this cookie only after a successful login; it is absent for
+# anonymous visitors. It is the authoritative "logged in" signal — far more
+# robust than the post-login URL, which does not reliably land on the orders
+# page (the redirect target varies, so a URL check times out while the user
+# is in fact authenticated).
+AUTH_COOKIE = "jlc_session_customer_code"
+
 
 def _ensure_dirs() -> None:
     COOKIE_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -37,16 +44,9 @@ def load_browser_cookies() -> list[dict]:
         return []
 
 
-def _is_orders_url(url: str) -> bool:
-    """Return True if ``url`` is on the authenticated orders page.
-
-    Strict scheme+host+path prefix match. Login pages on
-    ``passport.jlcpcb.com`` that carry a ``redirect_url`` query parameter
-    pointing back to ``/user-center/orders`` must NOT satisfy this check —
-    that's the false-positive that caused login to declare success before
-    the user had actually authenticated.
-    """
-    return url.startswith(ORDERS_URL)
+def _has_auth_cookie(cookies: list[dict]) -> bool:
+    """Return True if the authenticated-session cookie is present and non-empty."""
+    return any(c.get("name") == AUTH_COOKIE and c.get("value") for c in cookies)
 
 
 def login() -> None:
@@ -68,12 +68,22 @@ def login() -> None:
 
         try:
             page = context.pages[0] if context.pages else context.new_page()
+
+            # The persistent profile retains jlc_session_customer_code across
+            # runs (login even rewrites it to a far-future expiry). Left in
+            # place it would satisfy the cookie check below before the user
+            # authenticates — a false "login successful" against a session the
+            # server may have long since invalidated. Clear it so only a real
+            # login this run can set it again; a still-valid session simply
+            # re-issues it on the navigation below.
+            context.clear_cookies(name=AUTH_COOKIE)
+
             page.goto(f"{ORDERS_URL}/")
 
             print("Please log in via the browser window.")
-            print("Waiting for order page to load (up to 5 minutes)...")
+            print("Waiting for login to complete (up to 5 minutes)...")
 
-            _wait_for_login(page)
+            _wait_for_login(context, page)
 
             # Wait for post-login API calls to complete
             page.wait_for_timeout(2000)
@@ -97,16 +107,17 @@ def login() -> None:
             context.close()
 
 
-def _wait_for_login(page) -> None:
-    """Wait for the user to complete login and reach the orders page.
+def _wait_for_login(context, page) -> None:
+    """Wait for the user to complete login, detected via the session cookie.
 
     JLCPCB performs a client-side JS redirect to passport.jlcpcb.com for
-    unauthenticated requests, so the URL right after ``page.goto`` still
-    matches the original target. Wait for networkidle first so any pending
-    redirect settles, then poll for the orders URL.
+    unauthenticated requests. Wait for networkidle first so any pending
+    redirect settles, then poll the browser context for the auth cookie —
+    which appears only once the user has actually logged in, regardless of
+    which page the post-login redirect lands on.
 
     Raises:
-        TimeoutError: if the orders page is not reached within 5 minutes.
+        TimeoutError: if login is not completed within 5 minutes.
     """
     from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
@@ -118,7 +129,7 @@ def _wait_for_login(page) -> None:
     timeout = 300
     start = time.time()
     while time.time() - start < timeout:
-        if _is_orders_url(page.url):
+        if _has_auth_cookie(context.cookies()):
             return
         time.sleep(1)
     raise TimeoutError(
