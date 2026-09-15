@@ -9,6 +9,7 @@ from jlcpcb_cli.core.web_client import get_web_client
 from jlcpcb_cli.core.billing import list_billing, get_billing_detail, get_billing_invoice
 from jlcpcb_cli.core.orders import get_order
 from jlcpcb_cli.core.parts import list_inventory
+from jlcpcb_cli.core.smt import get_bom, get_usage
 from jlcpcb_cli.core.web_orders import list_orders
 from jlcpcb_cli.core.web_parts import list_parts_orders, get_parts_order
 from jlcpcb_cli.core import auth
@@ -65,6 +66,30 @@ def orders_get(batch_num):
     """Get full details for an order batch."""
     try:
         result = get_order(get_web_client(), batch_num)
+        _output(result)
+    except Exception as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
+
+@orders.command("bom")
+@click.argument("batch_num")
+def orders_bom(batch_num):
+    """Get the per-component BOM of a batch's SMT orders."""
+    try:
+        result = get_bom(get_web_client(), batch_num)
+        _output(result)
+    except Exception as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
+
+@orders.command("usage")
+@click.argument("batch_num")
+def orders_usage(batch_num):
+    """Get the Parts Manager stock a batch's SMT orders consumed."""
+    try:
+        result = get_usage(get_web_client(), batch_num)
         _output(result)
     except Exception as e:
         click.echo(f"Error: {e}", err=True)

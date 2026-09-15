@@ -54,6 +54,26 @@ Returns detailed information for all orders in a batch, including:
 - **SMT orders**: BOM/coordinate files, assembly costs, patch side
 - **3DP orders**: Status, dates, costs
 
+### Assembly BOM
+
+```bash
+jlcpcb-cli --json orders bom W2026082015506207
+```
+
+Lists every component of each SMT order in the batch: LCSC part number, manufacturer part, designators, placements, units consumed, and the price JLCPCB charged.
+
+`source` says where the units came from — `preorder` (your Parts Manager stock), `jlcpcb` (sourced by JLCPCB for this order), or `mixed`. `unitPrice` and `lineTotal` cover the JLCPCB-supplied units only, so both are 0 for a `preorder` row. `unitsFromPreorder` and `unitsFromJlcpcb` give the split.
+
+`placements` counts placements over the whole order, not per board. `unitsUsed` adds the loss allowance in `lossUnits`.
+
+### Inventory usage
+
+```bash
+jlcpcb-cli --json orders usage W2026082015506207
+```
+
+Shows the Parts Manager stock each SMT order consumed: per component, the quantity drawn, the settled unit price, and the `POB` pre-order batch it came from. `totalFromInventory` is the component cost that sits in those pre-order batches rather than in this order's invoice.
+
 ### Parts inventory
 
 ```bash
